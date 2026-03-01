@@ -1,7 +1,9 @@
 :root {
   font-family: 'Segoe UI', sans-serif;
-  color: #132238;
-  background: linear-gradient(180deg, #f4f8fb 0%, #dfeaf3 100%);
+  color: #122236;
+  background:
+    radial-gradient(circle at top right, rgba(155, 204, 255, 0.45), transparent 35%),
+    linear-gradient(180deg, #eef4f9 0%, #d8e4ef 100%);
 }
 
 * {
@@ -18,14 +20,57 @@ body {
 }
 
 .app-shell {
-  display: grid;
   min-height: 100vh;
-  place-items: center;
   padding: 24px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
 }
 
-.hero-card {
-  width: min(100%, 720px);
+.control-panel {
+  width: min(100%, 1100px);
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-end;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.button-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 18px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  color: #fff;
+  background: #0c66d6;
+  box-shadow: 0 10px 22px rgba(12, 102, 214, 0.22);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  background: #9aaabc;
+  box-shadow: none;
+}
+
+.status-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(320px, 1.1fr) minmax(320px, 0.9fr);
+}
+
+.status-card {
   padding: 40px;
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.9);
@@ -52,4 +97,72 @@ h1 {
   font-size: 1rem;
   line-height: 1.6;
   color: #35506c;
+}
+
+h2 {
+  margin: 0 0 20px;
+  font-size: 1.15rem;
+}
+
+.detail-list {
+  margin: 0;
+}
+
+.detail-list > div {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #d8e2ec;
+}
+
+.detail-list > div:last-child {
+  border-bottom: 0;
+}
+
+dt {
+  font-weight: 700;
+  color: #47637f;
+}
+
+dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.json-block {
+  margin: 0;
+  white-space: pre-wrap;
+  border-radius: 12px;
+  background: #eef4f9;
+  padding: 12px;
+  font-size: 0.95rem;
+}
+
+.empty-state {
+  margin: 0;
+  color: #47637f;
+}
+
+.screenshot {
+  display: block;
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid #d8e2ec;
+  background: #f8fbfd;
+}
+
+@media (max-width: 900px) {
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .status-card {
+    padding: 28px;
+  }
+
+  .detail-list > div {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
 }
