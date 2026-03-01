@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "npm run build -w @replaypilot/shared && tsx watch src/index.ts",
+    "dev": "tsx watch src/index.ts",
     "build": "npm run build -w @replaypilot/shared && tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "npm run build -w @replaypilot/shared && tsc -p tsconfig.json --noEmit",
