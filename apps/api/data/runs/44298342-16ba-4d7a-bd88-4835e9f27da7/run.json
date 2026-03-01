@@ -1,9 +1,0 @@
-{
-  "runId": "44298342-16ba-4d7a-bd88-4835e9f27da7",
-  "goal": "Open YouTube, search Adele Hello official music video, open top result, attempt Like. Success if Like toggles on or sign in prompt appears.",
-  "status": "stopped",
-  "step": 0,
-  "startedAt": 1772384959273,
-  "updatedAt": 1772384959320,
-  "history": []
-}

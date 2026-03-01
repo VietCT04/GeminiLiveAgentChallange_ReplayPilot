@@ -13,7 +13,6 @@ import {
   createRun,
   getRun,
   resolveArtifactPath,
-  resolveRunDir,
   updateRun,
 } from '../lib/run-store';
 
@@ -50,7 +49,7 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
       url: 'https://www.youtube.com',
     };
 
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: false });
 
     try {
       const context = await browser.newContext({
@@ -80,7 +79,7 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
       });
 
       await updateRun(runState.runId, {
-        status: 'running',
+        status: 'success',
         step: 1,
         lastAction: navigateAction,
         lastScreenshotUrl: `/runs/${runState.runId}/artifacts/${screenshotName}`,
