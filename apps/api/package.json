@@ -1,0 +1,19 @@
+{
+  "name": "@replaypilot/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint \"src/**/*.ts\""
+  },
+  "dependencies": {
+    "@replaypilot/shared": "0.1.0",
+    "fastify": "^5.2.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.3"
+  }
+}
