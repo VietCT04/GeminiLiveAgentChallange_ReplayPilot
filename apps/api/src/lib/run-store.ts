@@ -80,6 +80,18 @@ export const appendHistory = async (
   });
 };
 
+export const resolveRunDir = (runId: string): string => {
+  return getRunDir(runId);
+};
+
 export const resolveArtifactPath = (runId: string, name: string): string => {
-  return path.join(getRunDir(runId), name);
+  const runDir = getRunDir(runId);
+  const artifactPath = path.resolve(runDir, name);
+  const relativePath = path.relative(runDir, artifactPath);
+
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new Error('Invalid artifact path');
+  }
+
+  return artifactPath;
 };

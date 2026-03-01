@@ -12,6 +12,12 @@ Step 1 scaffolds a monorepo for the UI Navigator project.
 npm install
 ```
 
+For local Playwright screenshots, also install Chromium:
+
+```bash
+npx playwright install chromium
+```
+
 ## Run in development
 
 ```bash
