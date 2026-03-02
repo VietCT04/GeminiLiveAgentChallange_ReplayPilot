@@ -12,10 +12,16 @@ const PlannerOutputSchema = z.object({
 
 type PlannerOutput = z.infer<typeof PlannerOutputSchema>;
 
+export type PlannerViewport = {
+  width: number;
+  height: number;
+};
+
 type PlannerRequestLog = {
   model: string;
   goal: string;
   history: StepRecord[];
+  viewport: PlannerViewport;
   prompt: string;
   contents: Array<
     | {
@@ -50,7 +56,14 @@ const getClient = (): GoogleGenAI => {
   return new GoogleGenAI({ apiKey });
 };
 
-const buildPrompt = (goal: string, history: StepRecord[]): string => {
+const buildPrompt = (
+  goal: string,
+  history: StepRecord[],
+  viewport: PlannerViewport,
+): string => {
+  const maxX = viewport.width - 1;
+  const maxY = viewport.height - 1;
+
   return [
     'You are a browser action planner for a coordinate-based UI agent.',
     'You must produce exactly one JSON object with this exact shape:',
@@ -64,6 +77,14 @@ const buildPrompt = (goal: string, history: StepRecord[]): string => {
     'The "summary" must be a short plain-English description of what this step is trying to do.',
     'Use safe, minimal, non-destructive actions. Prefer short waits and the fewest steps needed.',
     'Use only actions that can be executed from the current screenshot.',
+    'Coordinate system rules for x,y:',
+    `- The screenshot viewport is width=${viewport.width}, height=${viewport.height}.`,
+    `- Origin is top-left of the webpage viewport: (0,0).`,
+    `- x increases to the right and must be an integer between 0 and ${maxX}.`,
+    `- y increases downward and must be an integer between 0 and ${maxY}.`,
+    '- For click or type with x,y, choose the center of the visible clickable target.',
+    '- Never output off-screen coordinates.',
+    '- If the target is uncertain or not clearly clickable, prefer wait or scroll instead of guessing.',
     'If the goal already appears completed, return {"summary":"...","action":{"type":"done","reason":"..."}}',
     `Goal: ${goal}`,
     `Recent history (${history.length}): ${JSON.stringify(history)}`,
@@ -74,8 +95,9 @@ export const planNextAction = async (
   goal: string,
   screenshotBytes: Buffer,
   history: StepRecord[],
+  viewport: PlannerViewport,
 ): Promise<Action> => {
-  const result = await planNextActionDetailed(goal, screenshotBytes, history);
+  const result = await planNextActionDetailed(goal, screenshotBytes, history, viewport);
   return result.action;
 };
 
@@ -83,14 +105,16 @@ export const planNextActionDetailed = async (
   goal: string,
   screenshotBytes: Buffer,
   history: StepRecord[],
+  viewport: PlannerViewport,
 ): Promise<{ action: Action; summary: string; debug: PlannerDebugPayload }> => {
   const recentHistory = history.slice(-HISTORY_WINDOW);
-  const prompt = buildPrompt(goal, recentHistory);
+  const prompt = buildPrompt(goal, recentHistory, viewport);
   const base64Image = screenshotBytes.toString('base64');
   const requestLog: PlannerRequestLog = {
     model: MODEL_NAME,
     goal,
     history: recentHistory,
+    viewport,
     prompt,
     contents: [
       { text: prompt },

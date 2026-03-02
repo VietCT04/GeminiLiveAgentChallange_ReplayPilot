@@ -16,7 +16,10 @@ import {
 const MAX_STEPS = 30;
 const NAVIGATION_TIMEOUT_MS = 15000;
 const STEP_SETTLE_MS = 800;
-const PLANNER_SCREENSHOT_NAME = 'planner_%STEP%.png';
+const VIEWPORT = {
+  width: 1280,
+  height: 720,
+};
 
 const allowedNavigationHosts = new Set([
   'youtube.com',
@@ -61,6 +64,46 @@ const ensureAllowedNavigate = (action: Action): void => {
 
   if (!allowedNavigationHosts.has(url.hostname.toLowerCase())) {
     throw new Error(`Blocked navigation host from planner: ${url.hostname}`);
+  }
+};
+
+const ensureCoordinatesInViewport = (action: Action): void => {
+  if (action.type === 'click') {
+    const { x, y } = action;
+
+    if (
+      !Number.isInteger(x) ||
+      !Number.isInteger(y) ||
+      x < 0 ||
+      y < 0 ||
+      x >= VIEWPORT.width ||
+      y >= VIEWPORT.height
+    ) {
+      throw new Error(
+        `Planner returned off-screen click coordinates: (${x}, ${y}) for viewport ${VIEWPORT.width}x${VIEWPORT.height}`,
+      );
+    }
+  }
+
+  if (
+    action.type === 'type' &&
+    typeof action.x === 'number' &&
+    typeof action.y === 'number'
+  ) {
+    const { x, y } = action;
+
+    if (
+      !Number.isInteger(x) ||
+      !Number.isInteger(y) ||
+      x < 0 ||
+      y < 0 ||
+      x >= VIEWPORT.width ||
+      y >= VIEWPORT.height
+    ) {
+      throw new Error(
+        `Planner returned off-screen type coordinates: (${x}, ${y}) for viewport ${VIEWPORT.width}x${VIEWPORT.height}`,
+      );
+    }
   }
 };
 
@@ -175,14 +218,12 @@ export const runDemoSequence = async (
   log: { info: (context: object, message: string) => void },
 ): Promise<void> => {
   let browser: Browser | null = null;
+  let keepBrowserOpen = false;
 
   try {
     browser = await chromium.launch({ headless: false });
     const context = await browser.newContext({
-      viewport: {
-        width: 1280,
-        height: 720,
-      },
+      viewport: VIEWPORT,
     });
     const page = await context.newPage();
 
@@ -201,10 +242,12 @@ export const runDemoSequence = async (
         currentRun.goal,
         plannerScreenshot,
         currentRun.history,
+        VIEWPORT,
       );
 
       await writePlannerDebugFiles(runId, index, debug);
       ensureAllowedNavigate(action);
+      ensureCoordinatesInViewport(action);
       ensureNoLoop(currentRun.history, action);
 
       if (action.type === 'done') {
@@ -220,6 +263,7 @@ export const runDemoSequence = async (
           lastAction: action,
           updatedAt: Date.now(),
         });
+        keepBrowserOpen = true;
         log.info({ runId, step: index, reason: action.reason }, 'Demo run done');
         break;
       }
@@ -245,7 +289,9 @@ export const runDemoSequence = async (
       throw new Error(`Planner reached max steps (${MAX_STEPS}) without finishing`);
     }
 
-    await context.close();
+    if (!keepBrowserOpen) {
+      await context.close();
+    }
   } catch (error) {
     await updateRun(runId, {
       status: 'fail',
@@ -255,6 +301,8 @@ export const runDemoSequence = async (
     });
     throw error;
   } finally {
-    await closeBrowser(browser);
+    if (!keepBrowserOpen) {
+      await closeBrowser(browser);
+    }
   }
 };
