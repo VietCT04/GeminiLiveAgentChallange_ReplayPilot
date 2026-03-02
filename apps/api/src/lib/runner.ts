@@ -207,7 +207,7 @@ const writePlannerDebugFiles = async (
   );
 };
 
-export const runDemoSequence = async (
+export const runSequence = async (
   runId: string,
   log: { info: (context: object, message: string) => void },
 ): Promise<void> => {
@@ -222,7 +222,7 @@ export const runDemoSequence = async (
 
     for (let index = 0; index < MAX_STEPS; index += 1) {
       if (await shouldStop(runId)) {
-        log.info({ runId }, 'Demo run stopped before planning next action');
+        log.info({ runId }, 'Run stopped before planning next action');
         break;
       }
 
@@ -259,7 +259,7 @@ export const runDemoSequence = async (
           lastAction: action,
           updatedAt: Date.now(),
         });
-        log.info({ runId, step: index, reason: action.reason }, 'Demo run done');
+        log.info({ runId, step: index, reason: action.reason }, 'Run done');
         break;
       }
 
@@ -267,14 +267,14 @@ export const runDemoSequence = async (
       await wait(page, STEP_SETTLE_MS);
 
       if (await shouldStop(runId)) {
-        log.info({ runId }, 'Demo run stopped after action execution');
+        log.info({ runId }, 'Run stopped after action execution');
         break;
       }
 
       await captureActionStep(runId, page, index, action, summary);
       log.info(
         { runId, step: index, actionType: action.type },
-        'Captured demo step',
+        'Captured run step',
       );
     }
 
@@ -287,8 +287,7 @@ export const runDemoSequence = async (
     await updateRun(runId, {
       status: 'fail',
       updatedAt: Date.now(),
-      error:
-        error instanceof Error ? error.message : 'Demo run execution failed',
+      error: error instanceof Error ? error.message : 'Run execution failed',
     });
     throw error;
   }

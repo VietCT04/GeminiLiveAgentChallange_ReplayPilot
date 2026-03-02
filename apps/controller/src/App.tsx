@@ -1,5 +1,6 @@
 import {
   RunStateSchema,
+  StartRunRequestSchema,
   StartRunResponseSchema,
   type RunState,
 } from '@replaypilot/shared';
@@ -7,6 +8,8 @@ import { useEffect, useRef, useState } from 'react';
 import { API_BASE_URL } from './config';
 
 const terminalStatuses = new Set(['success', 'fail', 'stopped']);
+const defaultGoal =
+  'Open YouTube, search Adele Hello official music video, open top result, attempt Like. Success if Like toggles on or sign in prompt appears.';
 
 const formatTimestamp = (value: number | undefined): string => {
   if (!value) {
@@ -42,6 +45,7 @@ const summarizeAction = (
 function App() {
   const [runId, setRunId] = useState<string | null>(null);
   const [runState, setRunState] = useState<RunState | null>(null);
+  const [goal, setGoal] = useState(defaultGoal);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
   const pollTimerRef = useRef<number | null>(null);
@@ -86,17 +90,28 @@ function App() {
     }, 1000);
   };
 
-  const handleRunClick = async (): Promise<void> => {
+  const startRun = async (
+    endpointPath: string,
+    failureMessage: string,
+  ): Promise<void> => {
     stopPolling();
     setRequestError(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/runs/demo`, {
+      const requestBody = StartRunRequestSchema.parse({
+        goal,
+      });
+
+      const response = await fetch(`${API_BASE_URL}${endpointPath}`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to start demo run');
+        throw new Error(failureMessage);
       }
 
       const payload = StartRunResponseSchema.parse(
@@ -107,11 +122,18 @@ function App() {
       await loadRun(payload.runId);
       startPolling(payload.runId);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to start demo run';
+      const message = error instanceof Error ? error.message : failureMessage;
       setIsPolling(false);
       setRequestError(message);
     }
+  };
+
+  const handleRunClick = async (): Promise<void> => {
+    await startRun('/runs', 'Failed to start run');
+  };
+
+  const handleComputerUseClick = async (): Promise<void> => {
+    await startRun('/runs/computer-use', 'Failed to start computer use run');
   };
 
   const handleStopClick = async (): Promise<void> => {
@@ -166,12 +188,32 @@ function App() {
             <p className="eyebrow">Step 3</p>
             <h1>ReplayPilot Controller</h1>
             <p className="subtitle">
-              Live run monitor with step-by-step screenshots and action logs.
+              Submit a goal, then monitor step-by-step screenshots and action logs.
             </p>
+          </div>
+          <div>
+            <label className="eyebrow" htmlFor="goal-input">
+              Goal
+            </label>
+            <textarea
+              id="goal-input"
+              className="json-block"
+              rows={3}
+              value={goal}
+              onChange={(event) => {
+                setGoal(event.target.value);
+              }}
+            />
           </div>
           <div className="button-row">
             <button type="button" onClick={() => void handleRunClick()}>
-              Run YouTube MV Demo
+              Start Run
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleComputerUseClick()}
+            >
+              Start Computer Use
             </button>
             <button
               type="button"
@@ -197,6 +239,10 @@ function App() {
               ) : null}
             </div>
             <dl className="detail-list">
+              <div>
+                <dt>Goal</dt>
+                <dd>{runState?.goal ?? goal}</dd>
+              </div>
               <div>
                 <dt>Status</dt>
                 <dd>{runState?.status ?? 'idle'}</dd>

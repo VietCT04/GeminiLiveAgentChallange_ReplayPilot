@@ -1,4 +1,6 @@
 import {
+  StartRunRequestSchema,
+  type StartRunRequest,
   StartRunResponseSchema,
   type StartRunResponse,
   type RunState,
@@ -6,7 +8,7 @@ import {
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
-import { runDemoSequence } from '../lib/runner';
+import { runSequence } from '../lib/runner';
 import { createRun, getRun, resolveArtifactPath, updateRun } from '../lib/run-store';
 
 const demoGoal =
@@ -31,23 +33,57 @@ const sendNotFound = async (reply: FastifyReply): Promise<void> => {
   await reply.code(404).send({ message: 'Not found' });
 };
 
+const startRun = async (
+  goal: string,
+  log: {
+    info: (context: object, message: string) => void;
+    error: (context: object, message: string) => void;
+  },
+): Promise<StartRunResponse> => {
+  const runState = await createRun(goal);
+  log.info({ runId: runState.runId }, 'Created run');
+
+  void runSequence(runState.runId, log).catch((error: unknown) => {
+    log.error({ runId: runState.runId, error }, 'Run failed during background execution');
+  });
+
+  return StartRunResponseSchema.parse({
+    runId: runState.runId,
+  });
+};
+
 export const runsRoutes: FastifyPluginAsync = async (app) => {
+  app.post<{ Body: StartRunRequest }>('/', async (request, reply) => {
+    const parsedBody = StartRunRequestSchema.safeParse(request.body);
+
+    if (!parsedBody.success) {
+      return reply.code(400).send({
+        message: 'Invalid run request',
+        issues: parsedBody.error.issues,
+      });
+    }
+
+    const response = await startRun(parsedBody.data.goal, app.log);
+    return reply.send(response);
+  });
+
+  app.post<{ Body: StartRunRequest }>('/computer-use', async (request, reply) => {
+    const parsedBody = StartRunRequestSchema.safeParse(request.body);
+
+    if (!parsedBody.success) {
+      return reply.code(400).send({
+        message: 'Invalid run request',
+        issues: parsedBody.error.issues,
+      });
+    }
+
+    const response = await startRun(parsedBody.data.goal, app.log);
+    return reply.send(response);
+  });
+
   app.post('/demo', async (_request, reply) => {
-    const runState = await createRun(demoGoal);
-    app.log.info({ runId: runState.runId }, 'Created demo run');
-
-    void runDemoSequence(runState.runId, app.log).catch(async (error: unknown) => {
-      app.log.error(
-        { runId: runState.runId, error },
-        'Demo run failed during background execution',
-      );
-    });
-
-    const response: StartRunResponse = {
-      runId: runState.runId,
-    };
-
-    return reply.send(StartRunResponseSchema.parse(response));
+    const response = await startRun(demoGoal, app.log);
+    return reply.send(response);
   });
 
   app.get<{ Params: { runId: string } }>('/:runId', async (request, reply) => {

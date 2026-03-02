@@ -2,8 +2,11 @@ import { ActionSchema, type Action, type StepRecord } from '@replaypilot/shared'
 import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
 
-const FLASH_MODEL_NAME = 'gemini-3-flash';
-const PRO_MODEL_NAME = 'gemini-3-pro';
+const COMPUTER_USE_MODEL_NAME =
+  process.env.GEMINI_COMPUTER_USE_MODEL ??
+  'gemini-2.5-computer-use-preview-10-2025';
+const FLASH_MODEL_NAME = COMPUTER_USE_MODEL_NAME;
+const PRO_MODEL_NAME = COMPUTER_USE_MODEL_NAME;
 const HISTORY_WINDOW = 6;
 const LOW_CONFIDENCE_THRESHOLD = 3;
 
@@ -13,6 +16,24 @@ const PlannerOutputSchema = z.object({
 });
 
 type PlannerOutput = z.infer<typeof PlannerOutputSchema>;
+
+type PlannerFunctionCall = {
+  id?: string;
+  name?: string;
+  args?: Record<string, unknown>;
+};
+
+type PlannerSdkResponse = {
+  text?: string;
+  functionCalls?: PlannerFunctionCall[] | (() => PlannerFunctionCall[] | undefined);
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{
+        functionCall?: PlannerFunctionCall;
+      }>;
+    };
+  }>;
+};
 
 export type PlannerViewport = {
   width: number;
@@ -30,6 +51,13 @@ type PlannerRequestLog = {
   history: StepRecord[];
   viewport: PlannerViewport;
   prompt: string;
+  config: {
+    tools: Array<{
+      computerUse: {
+        environment: 'ENVIRONMENT_BROWSER';
+      };
+    }>;
+  };
   contents: Array<
     | {
         text: string;
@@ -45,6 +73,11 @@ type PlannerRequestLog = {
 
 type PlannerResponseLog = {
   rawText: string;
+  functionCalls?: Array<{
+    id?: string;
+    name?: string;
+    args?: Record<string, unknown>;
+  }>;
   parsedOutput?: PlannerOutput;
   retryWithPro?: boolean;
 };
@@ -172,6 +205,238 @@ const tryRepairPlannerJson = (rawText: string): unknown | null => {
   }
 };
 
+const asRecord = (value: unknown): Record<string, unknown> | null => {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+};
+
+const readString = (...values: unknown[]): string | null => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.length > 0) {
+      return value;
+    }
+  }
+
+  return null;
+};
+
+const readNumber = (...values: unknown[]): number | null => {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+  }
+
+  return null;
+};
+
+const extractPoint = (
+  args: Record<string, unknown>,
+): { x: number | null; y: number | null } => {
+  const point =
+    asRecord(args.coordinate) ??
+    asRecord(args.coordinates) ??
+    asRecord(args.position) ??
+    asRecord(args.point);
+
+  return {
+    x: readNumber(args.x, point?.x, args.left),
+    y: readNumber(args.y, point?.y, args.top),
+  };
+};
+
+const toInt = (value: number | null): number | null => {
+  if (value === null) {
+    return null;
+  }
+
+  return Math.round(value);
+};
+
+const inferStartUrlFromGoal = (goal: string): string | null => {
+  const explicitUrlMatch = goal.match(/https?:\/\/\S+/i);
+
+  if (explicitUrlMatch?.[0]) {
+    return explicitUrlMatch[0].replace(/[),.;]+$/, '');
+  }
+
+  const lowerGoal = goal.toLowerCase();
+
+  if (lowerGoal.includes('youtube')) {
+    return 'https://www.youtube.com/';
+  }
+
+  if (lowerGoal.includes('google maps')) {
+    return 'https://www.google.com/maps';
+  }
+
+  if (lowerGoal.includes('google')) {
+    return 'https://www.google.com/';
+  }
+
+  if (lowerGoal.includes('github')) {
+    return 'https://github.com/';
+  }
+
+  return null;
+};
+
+const mapFunctionCallToPlannerOutput = (
+  goal: string,
+  functionCall: { name?: string; args?: Record<string, unknown> },
+): PlannerOutput => {
+  const name = functionCall.name ?? '';
+  const args = functionCall.args ?? {};
+  const lowerName = name.toLowerCase();
+
+  if (lowerName === 'open_web_browser' || lowerName === 'navigate') {
+    const url = readString(args.url, args.uri) ?? inferStartUrlFromGoal(goal);
+
+    if (!url) {
+      return {
+        summary: 'Browser opened and is ready',
+        action: {
+          type: 'wait',
+          ms: 250,
+        },
+      };
+    }
+
+    return {
+      summary: 'Open the requested page',
+      action: {
+        type: 'navigate',
+        url,
+      },
+    };
+  }
+
+  if (lowerName === 'click_at' || lowerName === 'click') {
+    const { x, y } = extractPoint(args);
+
+    if (x === null || y === null) {
+      throw new Error(`Computer Use tool call ${name} did not include click coordinates`);
+    }
+
+    return {
+      summary: 'Click the visible target',
+      action: {
+        type: 'click',
+        x: toInt(x) ?? 0,
+        y: toInt(y) ?? 0,
+      },
+    };
+  }
+
+  if (lowerName === 'type_text' || lowerName === 'type') {
+    const text = readString(args.text, args.value);
+
+    if (text === null) {
+      throw new Error(`Computer Use tool call ${name} did not include text`);
+    }
+
+    const { x, y } = extractPoint(args);
+
+    return {
+      summary: 'Type into the focused field',
+      action: {
+        type: 'type',
+        text,
+        ...(x !== null && y !== null
+          ? {
+              x: toInt(x) ?? 0,
+              y: toInt(y) ?? 0,
+            }
+          : {}),
+      },
+    };
+  }
+
+  if (lowerName === 'press_key' || lowerName === 'key_press') {
+    const key = readString(args.key, args.keyCode, args.code);
+
+    if (!key) {
+      throw new Error(`Computer Use tool call ${name} did not include a key`);
+    }
+
+    if (key.toLowerCase() === 'enter') {
+      return {
+        summary: 'Submit the current input',
+        action: {
+          type: 'type',
+          text: '',
+          submit: true,
+        },
+      };
+    }
+
+    throw new Error(`Unsupported Computer Use key press: ${key}`);
+  }
+
+  if (lowerName === 'scroll_by' || lowerName === 'scroll') {
+    const deltaY = readNumber(args.deltaY, args.delta_y, args.y, args.amount);
+
+    if (deltaY === null) {
+      throw new Error(`Computer Use tool call ${name} did not include a scroll delta`);
+    }
+
+    return {
+      summary: 'Scroll the page',
+      action: {
+        type: 'scroll',
+        deltaY: Math.round(deltaY),
+      },
+    };
+  }
+
+  if (lowerName === 'wait') {
+    const ms = readNumber(args.ms, args.milliseconds);
+    const seconds = readNumber(args.seconds);
+    const computedMs = ms ?? (seconds !== null ? seconds * 1000 : null);
+
+    if (computedMs === null) {
+      throw new Error(`Computer Use tool call ${name} did not include a wait duration`);
+    }
+
+    return {
+      summary: 'Wait for the page to update',
+      action: {
+        type: 'wait',
+        ms: Math.max(0, Math.round(computedMs)),
+      },
+    };
+  }
+
+  throw new Error(`Unsupported Computer Use tool call: ${name || 'unknown'}`);
+};
+
+const extractFunctionCalls = (
+  response: PlannerSdkResponse,
+): PlannerFunctionCall[] => {
+  const toPlannerFunctionCall = (call: PlannerFunctionCall): PlannerFunctionCall => {
+    return {
+      ...(call.id ? { id: call.id } : {}),
+      ...(call.name ? { name: call.name } : {}),
+      ...(call.args ? { args: call.args } : {}),
+    };
+  };
+
+  const directCalls =
+    typeof response.functionCalls === 'function'
+      ? response.functionCalls()
+      : response.functionCalls;
+
+  if (Array.isArray(directCalls) && directCalls.length > 0) {
+    return directCalls.map(toPlannerFunctionCall);
+  }
+
+  const candidateParts = response.candidates?.[0]?.content?.parts ?? [];
+  const partCalls = candidateParts
+    .map((part) => part.functionCall)
+    .filter((call): call is NonNullable<typeof call> => Boolean(call));
+
+  return partCalls.map(toPlannerFunctionCall);
+};
+
 const buildPrompt = (
   goal: string,
   history: StepRecord[],
@@ -181,30 +446,7 @@ const buildPrompt = (
   const maxY = viewport.height - 1;
 
   return [
-    'You are a browser action planner for a coordinate-based UI agent.',
-    'You must produce exactly one JSON object with this exact shape:',
-    '{"summary":"short step intent","action":{"type":"navigate","url":"https://..."}}',
-    '{"summary":"short step intent","action":{"type":"click","x":0,"y":0,"button":"left","clicks":1}}',
-    '{"summary":"short step intent","action":{"type":"type","text":"...","x":0,"y":0,"submit":false}}',
-    '{"summary":"short step intent","action":{"type":"scroll","deltaY":600}}',
-    '{"summary":"short step intent","action":{"type":"wait","ms":500}}',
-    '{"summary":"short step intent","action":{"type":"done","reason":"..."}}',
-    'Return ONLY raw JSON. No markdown. No code fences. No commentary.',
-    'The "summary" must be a short plain-English description of what this step is trying to do.',
-    'Do not use double quotes inside the summary string. Paraphrase labels instead of quoting UI text.',
-    'Use safe, minimal, non-destructive actions. Prefer short waits and the fewest steps needed.',
-    'Use only actions that can be executed from the current screenshot.',
-    'Coordinate system rules for x,y:',
-    `- The screenshot viewport is width=${viewport.width}, height=${viewport.height}.`,
-    `- Origin is top-left of the webpage viewport: (0,0).`,
-    `- x increases to the right and must be an integer between 0 and ${maxX}.`,
-    `- y increases downward and must be an integer between 0 and ${maxY}.`,
-    '- For click or type with x,y, choose the center of the visible clickable target.',
-    '- Never output off-screen coordinates.',
-    '- If the target is uncertain or not clearly clickable, prefer wait or scroll instead of guessing.',
-    'If the goal already appears completed, return {"summary":"...","action":{"type":"done","reason":"..."}}',
-    `Goal: ${goal}`,
-    `Recent history (${history.length}): ${JSON.stringify(history)}`,
+    `Goal: ${goal}`
   ].join('\n');
 };
 
@@ -230,18 +472,42 @@ const generatePlannerOutput = async (
   model: string,
   requestLog: PlannerRequestLog,
 ): Promise<PlannerResponseLog> => {
-  const response = await ai.models.generateContent({
+  const request = {
     model,
     contents: requestLog.contents,
-  });
+    config: requestLog.config,
+  } as Parameters<typeof ai.models.generateContent>[0];
+  const response = (await ai.models.generateContent(
+    request,
+  )) as PlannerSdkResponse;
 
   const rawText = response.text?.trim() ?? '';
+  const functionCalls = extractFunctionCalls(response);
   const responseLog: PlannerResponseLog = {
     rawText,
+    ...(functionCalls.length > 0
+      ? {
+          functionCalls,
+        }
+      : {}),
   };
 
-  if (!rawText) {
-    throw new Error('Gemini planner returned an empty response');
+  if (!rawText && functionCalls.length === 0) {
+    throw new Error('Gemini planner returned neither text nor a Computer Use tool call');
+  }
+
+  if (functionCalls.length > 0) {
+    const firstCall = functionCalls[0];
+
+    if (!firstCall) {
+      throw new Error('Computer Use returned an empty function call list');
+    }
+
+    responseLog.parsedOutput = mapFunctionCallToPlannerOutput(
+      requestLog.goal,
+      firstCall,
+    );
+    return responseLog;
   }
 
   let parsedJson: unknown;
@@ -286,6 +552,15 @@ export const planNextActionDetailed = async (
     history: recentHistory,
     viewport,
     prompt,
+    config: {
+      tools: [
+        {
+          computerUse: {
+            environment: 'ENVIRONMENT_BROWSER',
+          },
+        },
+      ],
+    },
     contents: [
       { text: prompt },
       {

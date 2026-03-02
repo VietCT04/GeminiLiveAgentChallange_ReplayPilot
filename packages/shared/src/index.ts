@@ -105,6 +105,12 @@ export const RunStateSchema = z.object({
 
 export type RunState = z.infer<typeof RunStateSchema>;
 
+export const StartRunRequestSchema = z.object({
+  goal: z.string().trim().min(1).max(500),
+});
+
+export type StartRunRequest = z.infer<typeof StartRunRequestSchema>;
+
 export const StartRunResponseSchema = z.object({
   runId: z.string(),
 });
