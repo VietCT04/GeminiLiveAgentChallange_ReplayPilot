@@ -77,6 +77,10 @@ button:disabled {
   box-shadow: 0 20px 50px rgba(19, 34, 56, 0.12);
 }
 
+.history-card {
+  margin-top: 20px;
+}
+
 .eyebrow {
   margin: 0 0 12px;
   font-size: 0.85rem;
@@ -102,6 +106,28 @@ h1 {
 h2 {
   margin: 0 0 20px;
   font-size: 1.15rem;
+}
+
+.card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.live-indicator,
+.step-counter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #eef4f9;
+  color: #35506c;
+  font-size: 0.9rem;
+  font-weight: 700;
 }
 
 .detail-list {
@@ -144,12 +170,94 @@ dd {
   color: #47637f;
 }
 
+.screenshot-frame {
+  position: relative;
+}
+
 .screenshot {
   display: block;
   width: 100%;
   border-radius: 16px;
   border: 1px solid #d8e2ec;
   background: #f8fbfd;
+}
+
+.screenshot-overlay {
+  position: absolute;
+  inset: auto 16px 16px 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(18, 34, 54, 0.78);
+  color: #fff;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(12, 102, 214, 0.2);
+  border-top-color: #0c66d6;
+  animation: spin 0.8s linear infinite;
+}
+
+.spinner-light {
+  border-color: rgba(255, 255, 255, 0.25);
+  border-top-color: #fff;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.history-item {
+  padding: 18px;
+  border-radius: 16px;
+  background: #f5f9fc;
+  border: 1px solid #d8e2ec;
+}
+
+.history-topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  color: #35506c;
+}
+
+.history-summary {
+  margin: 0 0 10px;
+  font-weight: 700;
+  color: #122236;
+}
+
+.history-json {
+  margin-bottom: 10px;
+}
+
+.history-meta {
+  margin: 0;
+  color: #47637f;
+  font-size: 0.95rem;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 900px) {

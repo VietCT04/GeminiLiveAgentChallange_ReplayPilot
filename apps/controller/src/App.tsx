@@ -16,10 +16,32 @@ const formatTimestamp = (value: number | undefined): string => {
   return new Date(value).toLocaleString();
 };
 
+const summarizeAction = (runState: RunState['history'][number]['action']): string => {
+  switch (runState.type) {
+    case 'navigate':
+      return `Navigate to ${runState.url}`;
+    case 'click':
+      return `Click at (${runState.x}, ${runState.y})`;
+    case 'type':
+      return `Type "${runState.text}"`;
+    case 'scroll':
+      return `Scroll ${runState.deltaY}`;
+    case 'wait':
+      return `Wait ${runState.ms}ms`;
+    case 'done':
+      return `Done: ${runState.reason}`;
+    default: {
+      const exhaustiveCheck: never = runState;
+      return JSON.stringify(exhaustiveCheck);
+    }
+  }
+};
+
 function App() {
   const [runId, setRunId] = useState<string | null>(null);
   const [runState, setRunState] = useState<RunState | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
   const pollTimerRef = useRef<number | null>(null);
 
   const stopPolling = (): void => {
@@ -27,18 +49,22 @@ function App() {
       window.clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
     }
+    setIsPolling(false);
   };
 
   const loadRun = async (nextRunId: string): Promise<void> => {
+    setIsPolling(true);
     const response = await fetch(`${API_BASE_URL}/runs/${nextRunId}`);
 
     if (!response.ok) {
+      setIsPolling(false);
       throw new Error(`Failed to load run ${nextRunId}`);
     }
 
     const payload = RunStateSchema.parse((await response.json()) as unknown);
     setRunState(payload);
     setRequestError(null);
+    setIsPolling(false);
 
     if (terminalStatuses.has(payload.status)) {
       stopPolling();
@@ -51,6 +77,7 @@ function App() {
       void loadRun(nextRunId).catch((error: unknown) => {
         const message =
           error instanceof Error ? error.message : 'Failed to poll run state';
+        setIsPolling(false);
         setRequestError(message);
         stopPolling();
       });
@@ -80,6 +107,7 @@ function App() {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to start demo run';
+      setIsPolling(false);
       setRequestError(message);
     }
   };
@@ -103,9 +131,11 @@ function App() {
       const payload = RunStateSchema.parse((await response.json()) as unknown);
       setRunState(payload);
       setRequestError(null);
+      setIsPolling(false);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to stop run';
+      setIsPolling(false);
       setRequestError(message);
     }
   };
@@ -117,8 +147,9 @@ function App() {
   }, []);
 
   const isRunning = runState?.status === 'running';
+  const isActive = isRunning || isPolling;
   const screenshotUrl = runState?.lastScreenshotUrl
-    ? `${API_BASE_URL}${runState.lastScreenshotUrl}`
+    ? `${API_BASE_URL}${runState.lastScreenshotUrl}?t=${runState.updatedAt}`
     : null;
 
   return (
@@ -128,6 +159,9 @@ function App() {
           <div>
             <p className="eyebrow">Step 3</p>
             <h1>ReplayPilot Controller</h1>
+            <p className="subtitle">
+              Live run monitor with step-by-step screenshots and action logs.
+            </p>
           </div>
           <div className="button-row">
             <button type="button" onClick={() => void handleRunClick()}>
@@ -145,7 +179,15 @@ function App() {
 
         <section className="status-grid">
           <div className="status-card">
-            <h2>Run State</h2>
+            <div className="card-title-row">
+              <h2>Run State</h2>
+              {isActive ? (
+                <div className="live-indicator" aria-live="polite">
+                  <span className="spinner" aria-hidden="true" />
+                  <span>{isRunning ? 'Waiting for next step' : 'Refreshing'}</span>
+                </div>
+              ) : null}
+            </div>
             <dl className="detail-list">
               <div>
                 <dt>Status</dt>
@@ -181,17 +223,63 @@ function App() {
           </div>
 
           <div className="status-card">
-            <h2>Screenshot</h2>
+            <div className="card-title-row">
+              <h2>Screenshot</h2>
+              <span className="step-counter">
+                {runState ? `${runState.history.length} logged steps` : '0 logged steps'}
+              </span>
+            </div>
             {screenshotUrl ? (
-              <img
-                className="screenshot"
-                src={screenshotUrl}
-                alt="Latest run screenshot"
-              />
+              <div className="screenshot-frame">
+                <img
+                  className="screenshot"
+                  src={screenshotUrl}
+                  alt="Latest run screenshot"
+                />
+                {isRunning ? (
+                  <div className="screenshot-overlay">
+                    <span className="spinner spinner-light" aria-hidden="true" />
+                    <span>Running next step...</span>
+                  </div>
+                ) : null}
+              </div>
             ) : (
               <p className="empty-state">no screenshot yet</p>
             )}
           </div>
+        </section>
+
+        <section className="status-card history-card">
+          <div className="card-title-row">
+            <h2>Step Log</h2>
+            <span className="step-counter">
+              {runState?.history.length ?? 0} total entries
+            </span>
+          </div>
+          {runState?.history.length ? (
+            <ol className="history-list">
+              {runState.history.map((entry) => (
+                <li className="history-item" key={`${entry.index}-${entry.ts}`}>
+                  <div className="history-topline">
+                    <strong>Step {entry.index}</strong>
+                    <span>{formatTimestamp(entry.ts)}</span>
+                  </div>
+                  <p className="history-summary">{summarizeAction(entry.action)}</p>
+                  <pre className="json-block history-json">
+                    {JSON.stringify(entry.action, null, 2)}
+                  </pre>
+                  <p className="history-meta">
+                    Screenshot: {entry.screenshotName ?? 'none'}
+                  </p>
+                  {entry.note ? (
+                    <p className="history-meta">Note: {entry.note}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="empty-state">No steps recorded yet.</p>
+          )}
         </section>
       </section>
     </main>
