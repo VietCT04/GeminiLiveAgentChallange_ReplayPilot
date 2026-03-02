@@ -251,6 +251,54 @@ const toInt = (value: number | null): number | null => {
   return Math.round(value);
 };
 
+const denormalizeCoordinate = (
+  value: number,
+  size: number,
+): number => {
+  const scaled = Math.floor((value / 1000) * size);
+  const max = size - 1;
+  return Math.min(Math.max(scaled, 0), max);
+};
+
+const denormalizeActionForViewport = (
+  action: Action,
+  viewport: PlannerViewport,
+): Action => {
+  if (action.type === 'click') {
+    return {
+      ...action,
+      x: denormalizeCoordinate(action.x, viewport.width),
+      y: denormalizeCoordinate(action.y, viewport.height),
+    };
+  }
+
+  if (
+    action.type === 'type' &&
+    typeof action.x === 'number' &&
+    typeof action.y === 'number'
+  ) {
+    return {
+      ...action,
+      x: denormalizeCoordinate(action.x, viewport.width),
+      y: denormalizeCoordinate(action.y, viewport.height),
+    };
+  }
+
+  return action;
+};
+
+const isCoordinateToolCall = (toolCall: ComputerUseToolCall): boolean => {
+  const lowerName = (toolCall.name ?? '').toLowerCase();
+
+  return (
+    lowerName === 'click_at' ||
+    lowerName === 'click' ||
+    lowerName === 'type_text_at' ||
+    lowerName === 'type_text' ||
+    lowerName === 'type'
+  );
+};
+
 const inferStartUrlFromGoal = (goal: string): string | null => {
   const explicitUrlMatch = goal.match(/https?:\/\/\S+/i);
 
@@ -528,11 +576,17 @@ const generatePlannerOutput = async (
     }
 
     responseLog.primaryToolCall = firstCall;
-    responseLog.parsedOutput = mapFunctionCallToPlannerOutput(
+    const mappedOutput = mapFunctionCallToPlannerOutput(
       requestLog.goal,
       requestLog.history,
       firstCall,
     );
+    responseLog.parsedOutput = {
+      ...mappedOutput,
+      action: isCoordinateToolCall(firstCall)
+        ? denormalizeActionForViewport(mappedOutput.action, requestLog.viewport)
+        : mappedOutput.action,
+    };
     return responseLog;
   }
 

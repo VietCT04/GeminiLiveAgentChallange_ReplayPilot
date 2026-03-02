@@ -290,47 +290,9 @@ const extractToolCallPoint = (
 };
 
 const toLoggedActionForComputerUse = (
-  toolCall: ComputerUseToolCall,
+  _toolCall: ComputerUseToolCall,
   actionPreview: Action,
 ): Action => {
-  const lowerName = (toolCall.name ?? '').toLowerCase();
-
-  if (
-    (lowerName === 'click_at' || lowerName === 'click') &&
-    actionPreview.type === 'click'
-  ) {
-    const point = extractToolCallPoint(toolCall);
-
-    if (!point) {
-      return actionPreview;
-    }
-
-    return {
-      ...actionPreview,
-      x: point.x,
-      y: point.y,
-    };
-  }
-
-  if (
-    (lowerName === 'type_text_at' ||
-      lowerName === 'type_text' ||
-      lowerName === 'type') &&
-    actionPreview.type === 'type'
-  ) {
-    const point = extractToolCallPoint(toolCall);
-
-    if (!point) {
-      return actionPreview;
-    }
-
-    return {
-      ...actionPreview,
-      x: point.x,
-      y: point.y,
-    };
-  }
-
   return actionPreview;
 };
 
