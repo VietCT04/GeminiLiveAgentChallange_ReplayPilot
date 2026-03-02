@@ -236,6 +236,9 @@ export const runDemoSequence = async (
         plannerScreenshot,
         currentRun.history,
         VIEWPORT,
+        {
+          verifierLowConfidenceStreak: 0,
+        },
       );
 
       await writePlannerDebugFiles(runId, index, debug);
