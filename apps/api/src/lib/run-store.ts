@@ -95,3 +95,12 @@ export const resolveArtifactPath = (runId: string, name: string): string => {
 
   return artifactPath;
 };
+
+export const writeArtifactJson = async (
+  runId: string,
+  name: string,
+  value: unknown,
+): Promise<void> => {
+  const artifactPath = resolveArtifactPath(runId, name);
+  await writeFile(artifactPath, JSON.stringify(value, null, 2), 'utf8');
+};

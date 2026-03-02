@@ -1,19 +1,36 @@
-import { type Action, type RunState } from '@replaypilot/shared';
+import {
+  type Action,
+  type RunState,
+  type StepRecord,
+} from '@replaypilot/shared';
 import { chromium, type Browser, type Page } from 'playwright';
+import { planNextActionDetailed } from '../planner/geminiPlanner';
 import {
   appendHistory,
   getRun,
   resolveArtifactPath,
   updateRun,
+  writeArtifactJson,
 } from './run-store';
 
-const MAX_STEPS = 10;
+const MAX_STEPS = 30;
 const NAVIGATION_TIMEOUT_MS = 15000;
 const STEP_SETTLE_MS = 800;
-const INITIAL_SETTLE_MS = 500;
+const PLANNER_SCREENSHOT_NAME = 'planner_%STEP%.png';
 
-const formatStepScreenshotName = (index: number): string => {
-  return `step_${String(index).padStart(2, '0')}.png`;
+const allowedNavigationHosts = new Set([
+  'youtube.com',
+  'www.youtube.com',
+  'consent.youtube.com',
+  'accounts.google.com',
+]);
+
+const formatStepFileName = (
+  prefix: string,
+  index: number,
+  extension: string,
+): string => {
+  return `${prefix}_${String(index).padStart(2, '0')}.${extension}`;
 };
 
 const wait = async (page: Page, ms: number): Promise<void> => {
@@ -27,6 +44,37 @@ const isTerminalStatus = (status: RunState['status']): boolean => {
 const shouldStop = async (runId: string): Promise<boolean> => {
   const runState = await getRun(runId);
   return runState.status === 'stopped';
+};
+
+const ensureAllowedNavigate = (action: Action): void => {
+  if (action.type !== 'navigate') {
+    return;
+  }
+
+  let url: URL;
+
+  try {
+    url = new URL(action.url);
+  } catch {
+    throw new Error(`Planner returned invalid navigation URL: ${action.url}`);
+  }
+
+  if (!allowedNavigationHosts.has(url.hostname.toLowerCase())) {
+    throw new Error(`Blocked navigation host from planner: ${url.hostname}`);
+  }
+};
+
+const ensureNoLoop = (history: StepRecord[], action: Action): void => {
+  if (history.length < 2) {
+    return;
+  }
+
+  const actionKey = JSON.stringify(action);
+  const lastTwo = history.slice(-2).map((entry) => JSON.stringify(entry.action));
+
+  if (lastTwo.every((entry) => entry === actionKey)) {
+    throw new Error(`Planner repeated the same action 3 times: ${actionKey}`);
+  }
 };
 
 export const executeAction = async (page: Page, action: Action): Promise<void> => {
@@ -67,13 +115,13 @@ export const executeAction = async (page: Page, action: Action): Promise<void> =
   }
 };
 
-const captureStep = async (
+const captureActionStep = async (
   runId: string,
   page: Page,
   index: number,
   action: Action,
 ): Promise<void> => {
-  const screenshotName = formatStepScreenshotName(index);
+  const screenshotName = formatStepFileName('step', index, 'png');
   const screenshotPath = resolveArtifactPath(runId, screenshotName);
 
   await page.screenshot({
@@ -97,6 +145,23 @@ const captureStep = async (
   });
 };
 
+const writePlannerDebugFiles = async (
+  runId: string,
+  index: number,
+  debug: unknown,
+): Promise<void> => {
+  await writeArtifactJson(
+    runId,
+    formatStepFileName('planner_request', index, 'json'),
+    (debug as { request: unknown }).request,
+  );
+  await writeArtifactJson(
+    runId,
+    formatStepFileName('planner_response', index, 'json'),
+    (debug as { response: unknown }).response,
+  );
+};
+
 const closeBrowser = async (browser: Browser | null): Promise<void> => {
   if (browser) {
     await browser.close();
@@ -107,19 +172,6 @@ export const runDemoSequence = async (
   runId: string,
   log: { info: (context: object, message: string) => void },
 ): Promise<void> => {
-  const actions: Action[] = [
-    { type: 'navigate', url: 'https://www.youtube.com' },
-    { type: 'click', x: 640, y: 92 },
-    { type: 'type', text: 'Adele Hello official music video' },
-    { type: 'wait', ms: 600 },
-    { type: 'click', x: 1135, y: 91 },
-    { type: 'wait', ms: 1200 },
-  ];
-
-  if (actions.length > MAX_STEPS) {
-    throw new Error(`Demo action count exceeds max steps (${MAX_STEPS})`);
-  }
-
   let browser: Browser | null = null;
 
   try {
@@ -132,31 +184,52 @@ export const runDemoSequence = async (
     });
     const page = await context.newPage();
 
-    for (let index = 0; index < actions.length; index += 1) {
+    for (let index = 0; index < MAX_STEPS; index += 1) {
       if (await shouldStop(runId)) {
-        log.info({ runId }, 'Demo run stopped before next action');
+        log.info({ runId }, 'Demo run stopped before planning next action');
         break;
       }
 
-      const action = actions[index];
-      if (!action) {
-        throw new Error(`Missing action at index ${index}`);
+      const currentRun = await getRun(runId);
+      const plannerScreenshot = await page.screenshot({
+        fullPage: false,
+      });
+
+      const { action, debug } = await planNextActionDetailed(
+        currentRun.goal,
+        plannerScreenshot,
+        currentRun.history,
+      );
+
+      await writePlannerDebugFiles(runId, index, debug);
+      ensureAllowedNavigate(action);
+      ensureNoLoop(currentRun.history, action);
+
+      if (action.type === 'done') {
+        await appendHistory(runId, {
+          index,
+          ts: Date.now(),
+          action,
+        });
+        await updateRun(runId, {
+          status: 'success',
+          step: index + 1,
+          lastAction: action,
+          updatedAt: Date.now(),
+        });
+        log.info({ runId, step: index, reason: action.reason }, 'Demo run done');
+        break;
       }
 
       await executeAction(page, action);
-
-      if (index === 0) {
-        await wait(page, INITIAL_SETTLE_MS);
-      } else {
-        await wait(page, STEP_SETTLE_MS);
-      }
+      await wait(page, STEP_SETTLE_MS);
 
       if (await shouldStop(runId)) {
         log.info({ runId }, 'Demo run stopped after action execution');
         break;
       }
 
-      await captureStep(runId, page, index, action);
+      await captureActionStep(runId, page, index, action);
       log.info(
         { runId, step: index, actionType: action.type },
         'Captured demo step',
@@ -166,11 +239,7 @@ export const runDemoSequence = async (
     const latestRunState = await getRun(runId);
 
     if (!isTerminalStatus(latestRunState.status)) {
-      await updateRun(runId, {
-        status: 'success',
-        updatedAt: Date.now(),
-      });
-      log.info({ runId }, 'Demo run completed');
+      throw new Error(`Planner reached max steps (${MAX_STEPS}) without finishing`);
     }
 
     await context.close();

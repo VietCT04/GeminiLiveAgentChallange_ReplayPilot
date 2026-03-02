@@ -10,7 +10,9 @@
     "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {
+    "@google/genai": "^0.14.1",
     "@replaypilot/shared": "0.1.0",
+    "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
     "playwright": "^1.52.0"
   },

@@ -1,4 +1,10 @@
+import { config as loadEnv } from 'dotenv';
+import * as path from 'node:path';
 import { buildServer } from './server';
+
+loadEnv({
+  path: path.resolve(__dirname, '..', '..', '..', '.env'),
+});
 
 const port = Number(process.env.PORT ?? 8080);
 const app = buildServer();
