@@ -16,7 +16,9 @@ const formatTimestamp = (value: number | undefined): string => {
   return new Date(value).toLocaleString();
 };
 
-const summarizeAction = (runState: RunState['history'][number]['action']): string => {
+const summarizeAction = (
+  runState: RunState['history'][number]['action'],
+): string => {
   switch (runState.type) {
     case 'navigate':
       return `Navigate to ${runState.url}`;
@@ -148,6 +150,10 @@ function App() {
 
   const isRunning = runState?.status === 'running';
   const isActive = isRunning || isPolling;
+  const latestEntry =
+    runState && runState.history.length > 0
+      ? runState.history[runState.history.length - 1]
+      : null;
   const screenshotUrl = runState?.lastScreenshotUrl
     ? `${API_BASE_URL}${runState.lastScreenshotUrl}?t=${runState.updatedAt}`
     : null;
@@ -184,7 +190,9 @@ function App() {
               {isActive ? (
                 <div className="live-indicator" aria-live="polite">
                   <span className="spinner" aria-hidden="true" />
-                  <span>{isRunning ? 'Waiting for next step' : 'Refreshing'}</span>
+                  <span>
+                    {isRunning ? 'Waiting for next step' : 'Refreshing'}
+                  </span>
                 </div>
               ) : null}
             </div>
@@ -216,6 +224,10 @@ function App() {
                 </dd>
               </div>
               <div>
+                <dt>Current Intent</dt>
+                <dd>{latestEntry?.note ?? 'none yet'}</dd>
+              </div>
+              <div>
                 <dt>Error</dt>
                 <dd>{runState?.error ?? requestError ?? 'none'}</dd>
               </div>
@@ -226,7 +238,9 @@ function App() {
             <div className="card-title-row">
               <h2>Screenshot</h2>
               <span className="step-counter">
-                {runState ? `${runState.history.length} logged steps` : '0 logged steps'}
+                {runState
+                  ? `${runState.history.length} logged steps`
+                  : '0 logged steps'}
               </span>
             </div>
             {screenshotUrl ? (
@@ -238,7 +252,10 @@ function App() {
                 />
                 {isRunning ? (
                   <div className="screenshot-overlay">
-                    <span className="spinner spinner-light" aria-hidden="true" />
+                    <span
+                      className="spinner spinner-light"
+                      aria-hidden="true"
+                    />
                     <span>Running next step...</span>
                   </div>
                 ) : null}
@@ -261,19 +278,18 @@ function App() {
               {runState.history.map((entry) => (
                 <li className="history-item" key={`${entry.index}-${entry.ts}`}>
                   <div className="history-topline">
-                    <strong>Step {entry.index}</strong>
+                    <strong>Step {entry.index + 1}</strong>
                     <span>{formatTimestamp(entry.ts)}</span>
                   </div>
-                  <p className="history-summary">{summarizeAction(entry.action)}</p>
+                  <p className="history-summary">
+                    {entry.note ?? summarizeAction(entry.action)}
+                  </p>
                   <pre className="json-block history-json">
                     {JSON.stringify(entry.action, null, 2)}
                   </pre>
                   <p className="history-meta">
                     Screenshot: {entry.screenshotName ?? 'none'}
                   </p>
-                  {entry.note ? (
-                    <p className="history-meta">Note: {entry.note}</p>
-                  ) : null}
                 </li>
               ))}
             </ol>
@@ -287,3 +303,4 @@ function App() {
 }
 
 export default App;
+  

@@ -120,6 +120,7 @@ const captureActionStep = async (
   page: Page,
   index: number,
   action: Action,
+  note: string,
 ): Promise<void> => {
   const screenshotName = formatStepFileName('step', index, 'png');
   const screenshotPath = resolveArtifactPath(runId, screenshotName);
@@ -134,6 +135,7 @@ const captureActionStep = async (
     ts: Date.now(),
     action,
     screenshotName,
+    note,
   });
 
   await updateRun(runId, {
@@ -195,7 +197,7 @@ export const runDemoSequence = async (
         fullPage: false,
       });
 
-      const { action, debug } = await planNextActionDetailed(
+      const { action, summary, debug } = await planNextActionDetailed(
         currentRun.goal,
         plannerScreenshot,
         currentRun.history,
@@ -210,6 +212,7 @@ export const runDemoSequence = async (
           index,
           ts: Date.now(),
           action,
+          note: summary,
         });
         await updateRun(runId, {
           status: 'success',
@@ -229,7 +232,7 @@ export const runDemoSequence = async (
         break;
       }
 
-      await captureActionStep(runId, page, index, action);
+      await captureActionStep(runId, page, index, action, summary);
       log.info(
         { runId, step: index, actionType: action.type },
         'Captured demo step',

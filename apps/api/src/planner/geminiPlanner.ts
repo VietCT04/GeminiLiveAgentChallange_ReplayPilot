@@ -1,8 +1,16 @@
 import { ActionSchema, type Action, type StepRecord } from '@replaypilot/shared';
 import { GoogleGenAI } from '@google/genai';
+import { z } from 'zod';
 
 const MODEL_NAME = 'gemini-2.5-flash';
 const HISTORY_WINDOW = 6;
+
+const PlannerOutputSchema = z.object({
+  summary: z.string().min(1).max(160),
+  action: ActionSchema,
+});
+
+type PlannerOutput = z.infer<typeof PlannerOutputSchema>;
 
 type PlannerRequestLog = {
   model: string;
@@ -24,7 +32,7 @@ type PlannerRequestLog = {
 
 type PlannerResponseLog = {
   rawText: string;
-  parsedAction?: Action;
+  parsedOutput?: PlannerOutput;
 };
 
 export type PlannerDebugPayload = {
@@ -45,17 +53,18 @@ const getClient = (): GoogleGenAI => {
 const buildPrompt = (goal: string, history: StepRecord[]): string => {
   return [
     'You are a browser action planner for a coordinate-based UI agent.',
-    'You must produce exactly one next action as strict JSON matching this shape:',
-    '{"type":"navigate","url":"https://..."}',
-    '{"type":"click","x":0,"y":0,"button":"left","clicks":1}',
-    '{"type":"type","text":"...","x":0,"y":0,"submit":false}',
-    '{"type":"scroll","deltaY":600}',
-    '{"type":"wait","ms":500}',
-    '{"type":"done","reason":"..."}',
+    'You must produce exactly one JSON object with this exact shape:',
+    '{"summary":"short step intent","action":{"type":"navigate","url":"https://..."}}',
+    '{"summary":"short step intent","action":{"type":"click","x":0,"y":0,"button":"left","clicks":1}}',
+    '{"summary":"short step intent","action":{"type":"type","text":"...","x":0,"y":0,"submit":false}}',
+    '{"summary":"short step intent","action":{"type":"scroll","deltaY":600}}',
+    '{"summary":"short step intent","action":{"type":"wait","ms":500}}',
+    '{"summary":"short step intent","action":{"type":"done","reason":"..."}}',
     'Return ONLY raw JSON. No markdown. No code fences. No commentary.',
+    'The "summary" must be a short plain-English description of what this step is trying to do.',
     'Use safe, minimal, non-destructive actions. Prefer short waits and the fewest steps needed.',
     'Use only actions that can be executed from the current screenshot.',
-    'If the goal already appears completed, return {"type":"done","reason":"..."}',
+    'If the goal already appears completed, return {"summary":"...","action":{"type":"done","reason":"..."}}',
     `Goal: ${goal}`,
     `Recent history (${history.length}): ${JSON.stringify(history)}`,
   ].join('\n');
@@ -74,7 +83,7 @@ export const planNextActionDetailed = async (
   goal: string,
   screenshotBytes: Buffer,
   history: StepRecord[],
-): Promise<{ action: Action; debug: PlannerDebugPayload }> => {
+): Promise<{ action: Action; summary: string; debug: PlannerDebugPayload }> => {
   const recentHistory = history.slice(-HISTORY_WINDOW);
   const prompt = buildPrompt(goal, recentHistory);
   const base64Image = screenshotBytes.toString('base64');
@@ -117,19 +126,20 @@ export const planNextActionDetailed = async (
     throw new Error(`Gemini planner returned non-JSON output: ${rawText}`);
   }
 
-  let action: Action;
+  let parsedOutput: PlannerOutput;
 
   try {
-    action = ActionSchema.parse(parsedJson);
+    parsedOutput = PlannerOutputSchema.parse(parsedJson);
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'unknown schema error';
-    throw new Error(`Gemini planner returned invalid Action JSON: ${reason}`);
+    throw new Error(`Gemini planner returned invalid planner JSON: ${reason}`);
   }
 
-  responseLog.parsedAction = action;
+  responseLog.parsedOutput = parsedOutput;
 
   return {
-    action,
+    action: parsedOutput.action,
+    summary: parsedOutput.summary,
     debug: {
       request: requestLog,
       response: responseLog,
