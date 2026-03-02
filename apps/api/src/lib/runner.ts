@@ -40,6 +40,76 @@ const wait = async (page: Page, ms: number): Promise<void> => {
   await page.waitForTimeout(ms);
 };
 
+const getActionPoint = (
+  action: Action,
+): { x: number; y: number } | null => {
+  if (action.type === 'click') {
+    return {
+      x: action.x,
+      y: action.y,
+    };
+  }
+
+  if (
+    action.type === 'type' &&
+    typeof action.x === 'number' &&
+    typeof action.y === 'number'
+  ) {
+    return {
+      x: action.x,
+      y: action.y,
+    };
+  }
+
+  return null;
+};
+
+const showActionMarker = async (
+  page: Page,
+  action: Action,
+): Promise<void> => {
+  const point = getActionPoint(action);
+
+  if (!point) {
+    return;
+  }
+
+  await page.evaluate(
+    ({ x, y }) => {
+      const existing = document.getElementById('replaypilot-action-marker');
+
+      if (existing) {
+        existing.remove();
+      }
+
+      const marker = document.createElement('div');
+      marker.id = 'replaypilot-action-marker';
+      marker.setAttribute('aria-hidden', 'true');
+      marker.style.position = 'fixed';
+      marker.style.left = `${x}px`;
+      marker.style.top = `${y}px`;
+      marker.style.width = '24px';
+      marker.style.height = '24px';
+      marker.style.marginLeft = '-12px';
+      marker.style.marginTop = '-12px';
+      marker.style.border = '3px solid #ff2d20';
+      marker.style.borderRadius = '999px';
+      marker.style.background = 'rgba(255, 45, 32, 0.18)';
+      marker.style.boxShadow = '0 0 0 4px rgba(255, 45, 32, 0.28)';
+      marker.style.pointerEvents = 'none';
+      marker.style.zIndex = '2147483647';
+      document.body.appendChild(marker);
+    },
+    point,
+  );
+};
+
+const hideActionMarker = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    document.getElementById('replaypilot-action-marker')?.remove();
+  });
+};
+
 const isTerminalStatus = (status: RunState['status']): boolean => {
   return status === 'success' || status === 'fail' || status === 'stopped';
 };
@@ -168,10 +238,16 @@ const captureActionStep = async (
   const screenshotName = formatStepFileName('step', index, 'png');
   const screenshotPath = resolveArtifactPath(runId, screenshotName);
 
-  await page.screenshot({
-    path: screenshotPath,
-    fullPage: false,
-  });
+  await showActionMarker(page, action);
+
+  try {
+    await page.screenshot({
+      path: screenshotPath,
+      fullPage: false,
+    });
+  } finally {
+    await hideActionMarker(page);
+  }
 
   await appendHistory(runId, {
     index,
