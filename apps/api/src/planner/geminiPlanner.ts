@@ -282,6 +282,7 @@ const inferStartUrlFromGoal = (goal: string): string | null => {
 
 const mapFunctionCallToPlannerOutput = (
   goal: string,
+  history: StepRecord[],
   functionCall: { name?: string; args?: Record<string, unknown> },
 ): PlannerOutput => {
   const name = functionCall.name ?? '';
@@ -289,7 +290,25 @@ const mapFunctionCallToPlannerOutput = (
   const lowerName = name.toLowerCase();
 
   if (lowerName === 'open_web_browser' || lowerName === 'navigate') {
-    const url = readString(args.url, args.uri) ?? inferStartUrlFromGoal(goal);
+    const explicitUrl = readString(args.url, args.uri);
+    const inferredUrl = inferStartUrlFromGoal(goal);
+    const url = explicitUrl ?? inferredUrl;
+    const lastAction = history[history.length - 1]?.action;
+    const alreadyNavigatedToStartUrl =
+      !explicitUrl &&
+      typeof inferredUrl === 'string' &&
+      lastAction?.type === 'navigate' &&
+      lastAction.url === inferredUrl;
+
+    if (alreadyNavigatedToStartUrl) {
+      return {
+        summary: 'Browser is already open',
+        action: {
+          type: 'wait',
+          ms: 500,
+        },
+      };
+    }
 
     if (!url) {
       return {
@@ -327,7 +346,11 @@ const mapFunctionCallToPlannerOutput = (
     };
   }
 
-  if (lowerName === 'type_text' || lowerName === 'type') {
+  if (
+    lowerName === 'type_text' ||
+    lowerName === 'type_text_at' ||
+    lowerName === 'type'
+  ) {
     const text = readString(args.text, args.value);
 
     if (text === null) {
@@ -446,8 +469,16 @@ const buildPrompt = (
   const maxY = viewport.height - 1;
 
   return [
-    `Goal: ${goal}`
-  ].join('\n');
+    'You are controlling a browser with the built-in Computer Use tool.',
+    'Use the current screenshot and recent actions to decide the next step.',
+    'Do not call open_web_browser again if the browser is already open on the target site.',
+    'After opening the site, prefer click_at, type_text, press_key, scroll_by, or wait.',
+    'Only return JSON when the task is complete and the correct action is to stop.',
+    'Done JSON shape:',
+    '{"summary":"short completion note","action":{"type":"done","reason":"..."}}',
+    `Goal: ${goal}`,
+    `Recent history (${history.length}): ${JSON.stringify(history)}`,
+  ].join(',');
 };
 
 export const planNextAction = async (
@@ -505,6 +536,7 @@ const generatePlannerOutput = async (
 
     responseLog.parsedOutput = mapFunctionCallToPlannerOutput(
       requestLog.goal,
+      requestLog.history,
       firstCall,
     );
     return responseLog;
