@@ -207,18 +207,11 @@ const writePlannerDebugFiles = async (
   );
 };
 
-const closeBrowser = async (browser: Browser | null): Promise<void> => {
-  if (browser) {
-    await browser.close();
-  }
-};
-
 export const runDemoSequence = async (
   runId: string,
   log: { info: (context: object, message: string) => void },
 ): Promise<void> => {
   let browser: Browser | null = null;
-  let keepBrowserOpen = false;
 
   try {
     browser = await chromium.launch({ headless: false });
@@ -263,7 +256,6 @@ export const runDemoSequence = async (
           lastAction: action,
           updatedAt: Date.now(),
         });
-        keepBrowserOpen = true;
         log.info({ runId, step: index, reason: action.reason }, 'Demo run done');
         break;
       }
@@ -288,10 +280,6 @@ export const runDemoSequence = async (
     if (!isTerminalStatus(latestRunState.status)) {
       throw new Error(`Planner reached max steps (${MAX_STEPS}) without finishing`);
     }
-
-    if (!keepBrowserOpen) {
-      await context.close();
-    }
   } catch (error) {
     await updateRun(runId, {
       status: 'fail',
@@ -300,9 +288,5 @@ export const runDemoSequence = async (
         error instanceof Error ? error.message : 'Demo run execution failed',
     });
     throw error;
-  } finally {
-    if (!keepBrowserOpen) {
-      await closeBrowser(browser);
-    }
   }
 };
