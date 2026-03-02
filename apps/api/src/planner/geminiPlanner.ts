@@ -9,7 +9,6 @@ const FLASH_MODEL_NAME = COMPUTER_USE_MODEL_NAME;
 const PRO_MODEL_NAME = COMPUTER_USE_MODEL_NAME;
 const HISTORY_WINDOW = 6;
 const LOW_CONFIDENCE_THRESHOLD = 3;
-const COORDINATE_TOLERANCE_PX = 80;
 
 const PlannerOutputSchema = z.object({
   summary: z.string().min(1).max(160),
@@ -252,52 +251,6 @@ const toInt = (value: number | null): number | null => {
   return Math.round(value);
 };
 
-const normalizeCoordinate = (
-  value: number,
-  max: number,
-  axis: 'x' | 'y',
-): number => {
-  const rounded = Math.round(value);
-
-  if (rounded < -COORDINATE_TOLERANCE_PX || rounded > max + COORDINATE_TOLERANCE_PX) {
-    throw new Error(
-      `Planner returned excessively off-screen ${axis} coordinate: ${rounded} for max ${max}`,
-    );
-  }
-
-  return Math.min(Math.max(rounded, 0), max);
-};
-
-const normalizeActionForViewport = (
-  action: Action,
-  viewport: PlannerViewport,
-): Action => {
-  const maxX = viewport.width - 1;
-  const maxY = viewport.height - 1;
-
-  if (action.type === 'click') {
-    return {
-      ...action,
-      x: normalizeCoordinate(action.x, maxX, 'x'),
-      y: normalizeCoordinate(action.y, maxY, 'y'),
-    };
-  }
-
-  if (
-    action.type === 'type' &&
-    typeof action.x === 'number' &&
-    typeof action.y === 'number'
-  ) {
-    return {
-      ...action,
-      x: normalizeCoordinate(action.x, maxX, 'x'),
-      y: normalizeCoordinate(action.y, maxY, 'y'),
-    };
-  }
-
-  return action;
-};
-
 const inferStartUrlFromGoal = (goal: string): string | null => {
   const explicitUrlMatch = goal.match(/https?:\/\/\S+/i);
 
@@ -511,27 +464,20 @@ const buildPrompt = (
   history: StepRecord[],
   viewport: PlannerViewport,
 ): string => {
-  const maxX = viewport.width - 1;
-  const maxY = viewport.height - 1;
-
   return [
     'You are controlling a browser with the built-in Computer Use tool.',
     'Use the current screenshot and recent actions to decide the next step.',
     'Do not call open_web_browser again if the browser is already open on the target site.',
     'After opening the site, prefer click_at, type_text, press_key, scroll_by, or wait.',
-    'Coordinate standard: use screenshot viewport coordinates only, not browser chrome or OS window coordinates.',
-    `The screenshot viewport is exactly ${viewport.width}px wide and ${viewport.height}px high.`,
-    `The top-left corner is (0, 0) and the bottom-right corner is (${maxX}, ${maxY}).`,
-    `Valid x values are integers from 0 to ${maxX}.`,
-    `Valid y values are integers from 0 to ${maxY}.`,
-    'For click_at and type_text_at, target the center of the visible element inside the screenshot.',
-    'Never place the point below the screenshot bottom edge.',
+    'For click_at and type_text_at, use normalized coordinates from 0 to 1000 on both axes.',
+    'Do not use raw pixel coordinates.',
+    `The screenshot viewport image is ${viewport.width}px wide and ${viewport.height}px high, but tool-call coordinates must stay normalized.`,
     'Only return JSON when the task is complete and the correct action is to stop.',
     'Done JSON shape:',
     '{"summary":"short completion note","action":{"type":"done","reason":"..."}}',
     `Goal: ${goal}`,
     `Recent history (${history.length}): ${JSON.stringify(history)}`,
-  ].join('\n');
+  ].join(',');
 };
 
 export const planNextAction = async (
@@ -699,7 +645,7 @@ export const planNextActionDetailed = async (
   }
 
   return {
-    action: normalizeActionForViewport(parsedOutput.action, viewport),
+    action: parsedOutput.action,
     summary: parsedOutput.summary,
     debug,
   };

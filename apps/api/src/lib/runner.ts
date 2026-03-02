@@ -44,6 +44,15 @@ const wait = async (page: Page, ms: number): Promise<void> => {
   await page.waitForTimeout(ms);
 };
 
+const denormalizeCoordinate = (
+  value: number,
+  size: number,
+): number => {
+  const scaled = Math.floor((value / 1000) * size);
+  const max = size - 1;
+  return Math.min(Math.max(scaled, 0), max);
+};
+
 const getActionPoint = (
   action: Action,
 ): { x: number; y: number } | null => {
@@ -275,9 +284,54 @@ const extractToolCallPoint = (
   }
 
   return {
-    x: Math.round(x),
-    y: Math.round(y),
+    x: denormalizeCoordinate(x, VIEWPORT.width),
+    y: denormalizeCoordinate(y, VIEWPORT.height),
   };
+};
+
+const toLoggedActionForComputerUse = (
+  toolCall: ComputerUseToolCall,
+  actionPreview: Action,
+): Action => {
+  const lowerName = (toolCall.name ?? '').toLowerCase();
+
+  if (
+    (lowerName === 'click_at' || lowerName === 'click') &&
+    actionPreview.type === 'click'
+  ) {
+    const point = extractToolCallPoint(toolCall);
+
+    if (!point) {
+      return actionPreview;
+    }
+
+    return {
+      ...actionPreview,
+      x: point.x,
+      y: point.y,
+    };
+  }
+
+  if (
+    (lowerName === 'type_text_at' ||
+      lowerName === 'type_text' ||
+      lowerName === 'type') &&
+    actionPreview.type === 'type'
+  ) {
+    const point = extractToolCallPoint(toolCall);
+
+    if (!point) {
+      return actionPreview;
+    }
+
+    return {
+      ...actionPreview,
+      x: point.x,
+      y: point.y,
+    };
+  }
+
+  return actionPreview;
 };
 
 const executeComputerUseToolCall = async (
@@ -600,22 +654,25 @@ export const runComputerUseSequence = async (
       );
 
       await writePlannerDebugFiles(runId, index, debug);
-      ensureNoLoop(currentRun.history, actionPreview);
+      const loggedAction = toolCall
+        ? toLoggedActionForComputerUse(toolCall, actionPreview)
+        : actionPreview;
+      ensureNoLoop(currentRun.history, loggedAction);
 
-      if (actionPreview.type === 'done') {
+      if (loggedAction.type === 'done') {
         await appendHistory(runId, {
           index,
           ts: Date.now(),
-          action: actionPreview,
+          action: loggedAction,
           note: summary,
         });
         await updateRun(runId, {
           status: 'success',
           step: index + 1,
-          lastAction: actionPreview,
+          lastAction: loggedAction,
           updatedAt: Date.now(),
         });
-        log.info({ runId, step: index, reason: actionPreview.reason }, 'Computer Use run done');
+        log.info({ runId, step: index, reason: loggedAction.reason }, 'Computer Use run done');
         break;
       }
 
@@ -631,7 +688,7 @@ export const runComputerUseSequence = async (
         break;
       }
 
-      await captureActionStep(runId, page, index, actionPreview, summary);
+      await captureActionStep(runId, page, index, loggedAction, summary);
       log.info(
         { runId, step: index, toolCall: toolCall.name ?? 'unknown' },
         'Captured computer use step',
