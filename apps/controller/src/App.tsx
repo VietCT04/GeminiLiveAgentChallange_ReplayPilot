@@ -49,12 +49,14 @@ function App() {
   const [requestError, setRequestError] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
   const pollTimerRef = useRef<number | null>(null);
+  const consecutivePollFailuresRef = useRef(0);
 
   const stopPolling = (): void => {
     if (pollTimerRef.current !== null) {
       window.clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
     }
+    consecutivePollFailuresRef.current = 0;
     setIsPolling(false);
   };
 
@@ -68,6 +70,7 @@ function App() {
     }
 
     const payload = RunStateSchema.parse((await response.json()) as unknown);
+    consecutivePollFailuresRef.current = 0;
     setRunState(payload);
     setRequestError(null);
     setIsPolling(false);
@@ -81,6 +84,12 @@ function App() {
     stopPolling();
     pollTimerRef.current = window.setInterval(() => {
       void loadRun(nextRunId).catch((error: unknown) => {
+        consecutivePollFailuresRef.current += 1;
+
+        if (consecutivePollFailuresRef.current <= 2) {
+          return;
+        }
+
         const message =
           error instanceof Error ? error.message : 'Failed to poll run state';
         setIsPolling(false);
