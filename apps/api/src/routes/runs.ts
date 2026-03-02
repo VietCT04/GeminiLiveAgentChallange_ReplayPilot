@@ -8,7 +8,7 @@ import {
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
-import { runSequence } from '../lib/runner';
+import { runComputerUseSequence, runSequence } from '../lib/runner';
 import { createRun, getRun, resolveArtifactPath, updateRun } from '../lib/run-store';
 
 const demoGoal =
@@ -39,11 +39,15 @@ const startRun = async (
     info: (context: object, message: string) => void;
     error: (context: object, message: string) => void;
   },
+  runInBackground: (
+    runId: string,
+    log: { info: (context: object, message: string) => void },
+  ) => Promise<void>,
 ): Promise<StartRunResponse> => {
   const runState = await createRun(goal);
   log.info({ runId: runState.runId }, 'Created run');
 
-  void runSequence(runState.runId, log).catch((error: unknown) => {
+  void runInBackground(runState.runId, log).catch((error: unknown) => {
     log.error({ runId: runState.runId, error }, 'Run failed during background execution');
   });
 
@@ -63,7 +67,7 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const response = await startRun(parsedBody.data.goal, app.log);
+    const response = await startRun(parsedBody.data.goal, app.log, runSequence);
     return reply.send(response);
   });
 
@@ -77,12 +81,16 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const response = await startRun(parsedBody.data.goal, app.log);
+    const response = await startRun(
+      parsedBody.data.goal,
+      app.log,
+      runComputerUseSequence,
+    );
     return reply.send(response);
   });
 
   app.post('/demo', async (_request, reply) => {
-    const response = await startRun(demoGoal, app.log);
+    const response = await startRun(demoGoal, app.log, runSequence);
     return reply.send(response);
   });
 

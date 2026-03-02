@@ -4,7 +4,11 @@ import {
   type StepRecord,
 } from '@replaypilot/shared';
 import { chromium, type Browser, type Page } from 'playwright';
-import { planNextActionDetailed } from '../planner/geminiPlanner';
+import {
+  planComputerUseStepDetailed,
+  planNextActionDetailed,
+  type ComputerUseToolCall,
+} from '../planner/geminiPlanner';
 import {
   appendHistory,
   getRun,
@@ -119,22 +123,26 @@ const shouldStop = async (runId: string): Promise<boolean> => {
   return runState.status === 'stopped';
 };
 
-const ensureAllowedNavigate = (action: Action): void => {
-  if (action.type !== 'navigate') {
-    return;
-  }
-
+const ensureAllowedNavigateUrl = (urlValue: string): void => {
   let url: URL;
 
   try {
-    url = new URL(action.url);
+    url = new URL(urlValue);
   } catch {
-    throw new Error(`Planner returned invalid navigation URL: ${action.url}`);
+    throw new Error(`Planner returned invalid navigation URL: ${urlValue}`);
   }
 
   if (!allowedNavigationHosts.has(url.hostname.toLowerCase())) {
     throw new Error(`Blocked navigation host from planner: ${url.hostname}`);
   }
+};
+
+const ensureAllowedNavigate = (action: Action): void => {
+  if (action.type !== 'navigate') {
+    return;
+  }
+
+  ensureAllowedNavigateUrl(action.url);
 };
 
 const ensureCoordinatesInViewport = (action: Action): void => {
@@ -225,6 +233,190 @@ export const executeAction = async (page: Page, action: Action): Promise<void> =
       const exhaustiveCheck: never = action;
       throw new Error(`Unsupported action: ${JSON.stringify(exhaustiveCheck)}`);
     }
+  }
+};
+
+const extractToolCallPoint = (
+  toolCall: ComputerUseToolCall,
+): { x: number; y: number } | null => {
+  const args = toolCall.args ?? {};
+  const point =
+    (typeof args.coordinate === 'object' && args.coordinate !== null
+      ? (args.coordinate as Record<string, unknown>)
+      : null) ??
+    (typeof args.coordinates === 'object' && args.coordinates !== null
+      ? (args.coordinates as Record<string, unknown>)
+      : null) ??
+    (typeof args.position === 'object' && args.position !== null
+      ? (args.position as Record<string, unknown>)
+      : null) ??
+    (typeof args.point === 'object' && args.point !== null
+      ? (args.point as Record<string, unknown>)
+      : null);
+  const x =
+    typeof args.x === 'number'
+      ? args.x
+      : typeof point?.x === 'number'
+        ? point.x
+        : typeof args.left === 'number'
+          ? args.left
+          : null;
+  const y =
+    typeof args.y === 'number'
+      ? args.y
+      : typeof point?.y === 'number'
+        ? point.y
+        : typeof args.top === 'number'
+          ? args.top
+          : null;
+
+  if (typeof x !== 'number' || typeof y !== 'number') {
+    return null;
+  }
+
+  return {
+    x: Math.round(x),
+    y: Math.round(y),
+  };
+};
+
+const executeComputerUseToolCall = async (
+  page: Page,
+  goal: string,
+  toolCall: ComputerUseToolCall,
+): Promise<void> => {
+  const name = (toolCall.name ?? '').toLowerCase();
+  const args = toolCall.args ?? {};
+
+  switch (name) {
+    case 'open_web_browser':
+    case 'navigate': {
+      const url =
+        (typeof args.url === 'string' ? args.url : null) ??
+        (typeof args.uri === 'string' ? args.uri : null) ??
+        (goal.toLowerCase().includes('youtube') ? 'https://www.youtube.com/' : null);
+
+      if (!url) {
+        await wait(page, 250);
+        return;
+      }
+
+      ensureAllowedNavigateUrl(url);
+      await page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: NAVIGATION_TIMEOUT_MS,
+      });
+      return;
+    }
+    case 'click_at':
+    case 'click': {
+      const point = extractToolCallPoint(toolCall);
+
+      if (!point) {
+        throw new Error(`Computer Use tool call ${toolCall.name ?? 'unknown'} did not include click coordinates`);
+      }
+
+      await page.mouse.click(point.x, point.y, {
+        button:
+          args.button === 'middle' || args.button === 'right' ? args.button : 'left',
+        clickCount:
+          typeof args.clicks === 'number' && Number.isInteger(args.clicks) && args.clicks > 0
+            ? args.clicks
+            : 1,
+      });
+      return;
+    }
+    case 'type_text':
+    case 'type_text_at':
+    case 'type': {
+      const text =
+        typeof args.text === 'string'
+          ? args.text
+          : typeof args.value === 'string'
+            ? args.value
+            : null;
+
+      if (text === null) {
+        throw new Error(`Computer Use tool call ${toolCall.name ?? 'unknown'} did not include text`);
+      }
+
+      const point = extractToolCallPoint(toolCall);
+
+      if (point) {
+        await page.mouse.click(point.x, point.y);
+      }
+
+      await page.keyboard.type(text, { delay: 40 });
+
+      const shouldPressEnter =
+        args.press_enter === true ||
+        args.pressEnter === true ||
+        args.submit === true ||
+        args.enter === true;
+
+      if (shouldPressEnter) {
+        await page.keyboard.press('Enter');
+      }
+
+      return;
+    }
+    case 'press_key':
+    case 'key_press': {
+      const key =
+        typeof args.key === 'string'
+          ? args.key
+          : typeof args.keyCode === 'string'
+            ? args.keyCode
+            : typeof args.code === 'string'
+              ? args.code
+              : null;
+
+      if (!key) {
+        throw new Error(`Computer Use tool call ${toolCall.name ?? 'unknown'} did not include a key`);
+      }
+
+      await page.keyboard.press(key);
+      return;
+    }
+    case 'scroll_by':
+    case 'scroll': {
+      const deltaY =
+        typeof args.deltaY === 'number'
+          ? args.deltaY
+          : typeof args.delta_y === 'number'
+            ? args.delta_y
+            : typeof args.amount === 'number'
+              ? args.amount
+              : typeof args.y === 'number'
+                ? args.y
+                : null;
+
+      if (deltaY === null) {
+        throw new Error(`Computer Use tool call ${toolCall.name ?? 'unknown'} did not include a scroll delta`);
+      }
+
+      await page.mouse.wheel(0, deltaY);
+      return;
+    }
+    case 'wait': {
+      const ms =
+        typeof args.ms === 'number'
+          ? args.ms
+          : typeof args.milliseconds === 'number'
+            ? args.milliseconds
+            : typeof args.seconds === 'number'
+              ? args.seconds * 1000
+              : null;
+
+      if (ms === null) {
+        throw new Error(`Computer Use tool call ${toolCall.name ?? 'unknown'} did not include a wait duration`);
+      }
+
+      await wait(page, Math.max(0, Math.round(ms)));
+      return;
+    }
+    default:
+      throw new Error(`Unsupported Computer Use tool call: ${toolCall.name ?? 'unknown'}`);
   }
 };
 
@@ -366,5 +558,99 @@ export const runSequence = async (
       error: error instanceof Error ? error.message : 'Run execution failed',
     });
     throw error;
+  }
+};
+
+export const runComputerUseSequence = async (
+  runId: string,
+  log: { info: (context: object, message: string) => void },
+): Promise<void> => {
+  let browser: Browser | null = null;
+
+  try {
+    browser = await chromium.launch({ headless: false });
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+    });
+    const page = await context.newPage();
+
+    for (let index = 0; index < MAX_STEPS; index += 1) {
+      if (await shouldStop(runId)) {
+        log.info({ runId }, 'Computer Use run stopped before planning next action');
+        break;
+      }
+
+      const currentRun = await getRun(runId);
+      const plannerScreenshot = await page.screenshot({
+        fullPage: false,
+      });
+      const {
+        toolCall,
+        actionPreview,
+        summary,
+        debug,
+      } = await planComputerUseStepDetailed(
+        currentRun.goal,
+        plannerScreenshot,
+        currentRun.history,
+        VIEWPORT,
+        {
+          verifierLowConfidenceStreak: 0,
+        },
+      );
+
+      await writePlannerDebugFiles(runId, index, debug);
+      ensureNoLoop(currentRun.history, actionPreview);
+
+      if (actionPreview.type === 'done') {
+        await appendHistory(runId, {
+          index,
+          ts: Date.now(),
+          action: actionPreview,
+          note: summary,
+        });
+        await updateRun(runId, {
+          status: 'success',
+          step: index + 1,
+          lastAction: actionPreview,
+          updatedAt: Date.now(),
+        });
+        log.info({ runId, step: index, reason: actionPreview.reason }, 'Computer Use run done');
+        break;
+      }
+
+      if (!toolCall) {
+        throw new Error('Computer Use planner did not return a tool call');
+      }
+
+      await executeComputerUseToolCall(page, currentRun.goal, toolCall);
+      await wait(page, STEP_SETTLE_MS);
+
+      if (await shouldStop(runId)) {
+        log.info({ runId }, 'Computer Use run stopped after tool execution');
+        break;
+      }
+
+      await captureActionStep(runId, page, index, actionPreview, summary);
+      log.info(
+        { runId, step: index, toolCall: toolCall.name ?? 'unknown' },
+        'Captured computer use step',
+      );
+    }
+
+    const latestRunState = await getRun(runId);
+
+    if (!isTerminalStatus(latestRunState.status)) {
+      throw new Error(`Planner reached max steps (${MAX_STEPS}) without finishing`);
+    }
+  } catch (error) {
+    await updateRun(runId, {
+      status: 'fail',
+      updatedAt: Date.now(),
+      error: error instanceof Error ? error.message : 'Computer Use run execution failed',
+    });
+    throw error;
+  } finally {
+    await browser?.close();
   }
 };

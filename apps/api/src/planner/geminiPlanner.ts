@@ -9,6 +9,7 @@ const FLASH_MODEL_NAME = COMPUTER_USE_MODEL_NAME;
 const PRO_MODEL_NAME = COMPUTER_USE_MODEL_NAME;
 const HISTORY_WINDOW = 6;
 const LOW_CONFIDENCE_THRESHOLD = 3;
+const COORDINATE_TOLERANCE_PX = 80;
 
 const PlannerOutputSchema = z.object({
   summary: z.string().min(1).max(160),
@@ -17,7 +18,7 @@ const PlannerOutputSchema = z.object({
 
 type PlannerOutput = z.infer<typeof PlannerOutputSchema>;
 
-type PlannerFunctionCall = {
+export type ComputerUseToolCall = {
   id?: string;
   name?: string;
   args?: Record<string, unknown>;
@@ -25,11 +26,11 @@ type PlannerFunctionCall = {
 
 type PlannerSdkResponse = {
   text?: string;
-  functionCalls?: PlannerFunctionCall[] | (() => PlannerFunctionCall[] | undefined);
+  functionCalls?: ComputerUseToolCall[] | (() => ComputerUseToolCall[] | undefined);
   candidates?: Array<{
     content?: {
       parts?: Array<{
-        functionCall?: PlannerFunctionCall;
+        functionCall?: ComputerUseToolCall;
       }>;
     };
   }>;
@@ -73,11 +74,8 @@ type PlannerRequestLog = {
 
 type PlannerResponseLog = {
   rawText: string;
-  functionCalls?: Array<{
-    id?: string;
-    name?: string;
-    args?: Record<string, unknown>;
-  }>;
+  functionCalls?: ComputerUseToolCall[];
+  primaryToolCall?: ComputerUseToolCall;
   parsedOutput?: PlannerOutput;
   retryWithPro?: boolean;
 };
@@ -206,7 +204,9 @@ const tryRepairPlannerJson = (rawText: string): unknown | null => {
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null => {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : null;
 };
 
 const readString = (...values: unknown[]): string | null => {
@@ -250,6 +250,52 @@ const toInt = (value: number | null): number | null => {
   }
 
   return Math.round(value);
+};
+
+const normalizeCoordinate = (
+  value: number,
+  max: number,
+  axis: 'x' | 'y',
+): number => {
+  const rounded = Math.round(value);
+
+  if (rounded < -COORDINATE_TOLERANCE_PX || rounded > max + COORDINATE_TOLERANCE_PX) {
+    throw new Error(
+      `Planner returned excessively off-screen ${axis} coordinate: ${rounded} for max ${max}`,
+    );
+  }
+
+  return Math.min(Math.max(rounded, 0), max);
+};
+
+const normalizeActionForViewport = (
+  action: Action,
+  viewport: PlannerViewport,
+): Action => {
+  const maxX = viewport.width - 1;
+  const maxY = viewport.height - 1;
+
+  if (action.type === 'click') {
+    return {
+      ...action,
+      x: normalizeCoordinate(action.x, maxX, 'x'),
+      y: normalizeCoordinate(action.y, maxY, 'y'),
+    };
+  }
+
+  if (
+    action.type === 'type' &&
+    typeof action.x === 'number' &&
+    typeof action.y === 'number'
+  ) {
+    return {
+      ...action,
+      x: normalizeCoordinate(action.x, maxX, 'x'),
+      y: normalizeCoordinate(action.y, maxY, 'y'),
+    };
+  }
+
+  return action;
 };
 
 const inferStartUrlFromGoal = (goal: string): string | null => {
@@ -434,8 +480,8 @@ const mapFunctionCallToPlannerOutput = (
 
 const extractFunctionCalls = (
   response: PlannerSdkResponse,
-): PlannerFunctionCall[] => {
-  const toPlannerFunctionCall = (call: PlannerFunctionCall): PlannerFunctionCall => {
+): ComputerUseToolCall[] => {
+  const toToolCall = (call: ComputerUseToolCall): ComputerUseToolCall => {
     return {
       ...(call.id ? { id: call.id } : {}),
       ...(call.name ? { name: call.name } : {}),
@@ -449,7 +495,7 @@ const extractFunctionCalls = (
       : response.functionCalls;
 
   if (Array.isArray(directCalls) && directCalls.length > 0) {
-    return directCalls.map(toPlannerFunctionCall);
+    return directCalls.map(toToolCall);
   }
 
   const candidateParts = response.candidates?.[0]?.content?.parts ?? [];
@@ -457,7 +503,7 @@ const extractFunctionCalls = (
     .map((part) => part.functionCall)
     .filter((call): call is NonNullable<typeof call> => Boolean(call));
 
-  return partCalls.map(toPlannerFunctionCall);
+  return partCalls.map(toToolCall);
 };
 
 const buildPrompt = (
@@ -473,12 +519,19 @@ const buildPrompt = (
     'Use the current screenshot and recent actions to decide the next step.',
     'Do not call open_web_browser again if the browser is already open on the target site.',
     'After opening the site, prefer click_at, type_text, press_key, scroll_by, or wait.',
+    'Coordinate standard: use screenshot viewport coordinates only, not browser chrome or OS window coordinates.',
+    `The screenshot viewport is exactly ${viewport.width}px wide and ${viewport.height}px high.`,
+    `The top-left corner is (0, 0) and the bottom-right corner is (${maxX}, ${maxY}).`,
+    `Valid x values are integers from 0 to ${maxX}.`,
+    `Valid y values are integers from 0 to ${maxY}.`,
+    'For click_at and type_text_at, target the center of the visible element inside the screenshot.',
+    'Never place the point below the screenshot bottom edge.',
     'Only return JSON when the task is complete and the correct action is to stop.',
     'Done JSON shape:',
     '{"summary":"short completion note","action":{"type":"done","reason":"..."}}',
     `Goal: ${goal}`,
     `Recent history (${history.length}): ${JSON.stringify(history)}`,
-  ].join(',');
+  ].join('\n');
 };
 
 export const planNextAction = async (
@@ -508,19 +561,13 @@ const generatePlannerOutput = async (
     contents: requestLog.contents,
     config: requestLog.config,
   } as Parameters<typeof ai.models.generateContent>[0];
-  const response = (await ai.models.generateContent(
-    request,
-  )) as PlannerSdkResponse;
+  const response = (await ai.models.generateContent(request)) as PlannerSdkResponse;
 
   const rawText = response.text?.trim() ?? '';
   const functionCalls = extractFunctionCalls(response);
   const responseLog: PlannerResponseLog = {
     rawText,
-    ...(functionCalls.length > 0
-      ? {
-          functionCalls,
-        }
-      : {}),
+    ...(functionCalls.length > 0 ? { functionCalls } : {}),
   };
 
   if (!rawText && functionCalls.length === 0) {
@@ -534,6 +581,7 @@ const generatePlannerOutput = async (
       throw new Error('Computer Use returned an empty function call list');
     }
 
+    responseLog.primaryToolCall = firstCall;
     responseLog.parsedOutput = mapFunctionCallToPlannerOutput(
       requestLog.goal,
       requestLog.history,
@@ -566,13 +614,13 @@ const generatePlannerOutput = async (
   return responseLog;
 };
 
-export const planNextActionDetailed = async (
+const runPlannerTurnDetailed = async (
   goal: string,
   screenshotBytes: Buffer,
   history: StepRecord[],
   viewport: PlannerViewport,
   context: PlannerContext = {},
-): Promise<{ action: Action; summary: string; debug: PlannerDebugPayload }> => {
+): Promise<{ responseLog: PlannerResponseLog; debug: PlannerDebugPayload }> => {
   const recentHistory = history.slice(-HISTORY_WINDOW);
   const prompt = buildPrompt(goal, recentHistory, viewport);
   const base64Image = screenshotBytes.toString('base64');
@@ -621,6 +669,29 @@ export const planNextActionDetailed = async (
     responseLog.retryWithPro = true;
   }
 
+  return {
+    responseLog,
+    debug: {
+      request: requestLog,
+      response: responseLog,
+    },
+  };
+};
+
+export const planNextActionDetailed = async (
+  goal: string,
+  screenshotBytes: Buffer,
+  history: StepRecord[],
+  viewport: PlannerViewport,
+  context: PlannerContext = {},
+): Promise<{ action: Action; summary: string; debug: PlannerDebugPayload }> => {
+  const { responseLog, debug } = await runPlannerTurnDetailed(
+    goal,
+    screenshotBytes,
+    history,
+    viewport,
+    context,
+  );
   const parsedOutput = responseLog.parsedOutput;
 
   if (!parsedOutput) {
@@ -628,11 +699,41 @@ export const planNextActionDetailed = async (
   }
 
   return {
-    action: parsedOutput.action,
+    action: normalizeActionForViewport(parsedOutput.action, viewport),
     summary: parsedOutput.summary,
-    debug: {
-      request: requestLog,
-      response: responseLog,
-    },
+    debug,
+  };
+};
+
+export const planComputerUseStepDetailed = async (
+  goal: string,
+  screenshotBytes: Buffer,
+  history: StepRecord[],
+  viewport: PlannerViewport,
+  context: PlannerContext = {},
+): Promise<{
+  toolCall?: ComputerUseToolCall;
+  actionPreview: Action;
+  summary: string;
+  debug: PlannerDebugPayload;
+}> => {
+  const { responseLog, debug } = await runPlannerTurnDetailed(
+    goal,
+    screenshotBytes,
+    history,
+    viewport,
+    context,
+  );
+  const parsedOutput = responseLog.parsedOutput;
+
+  if (!parsedOutput) {
+    throw new Error('Gemini planner did not return parsed output');
+  }
+
+  return {
+    ...(responseLog.primaryToolCall ? { toolCall: responseLog.primaryToolCall } : {}),
+    actionPreview: parsedOutput.action,
+    summary: parsedOutput.summary,
+    debug,
   };
 };
