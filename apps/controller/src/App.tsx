@@ -11,6 +11,13 @@ const terminalStatuses = new Set(['success', 'fail', 'stopped']);
 const defaultGoal =
   'Open YouTube, search Adele Hello official music video, open top result, attempt Like. Success if Like toggles on or sign in prompt appears.';
 
+type ChatMessage = {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  text: string;
+  timestamp: number;
+};
+
 const formatTimestamp = (value: number | undefined): string => {
   if (!value) {
     return 'none yet';
@@ -48,8 +55,35 @@ function App() {
   const [goal, setGoal] = useState(defaultGoal);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: 'intro',
+      role: 'system',
+      text: 'Send an instruction to start a run. Progress updates will appear here while processing details stay on the right.',
+      timestamp: Date.now(),
+    },
+  ]);
   const pollTimerRef = useRef<number | null>(null);
   const consecutivePollFailuresRef = useRef(0);
+  const reportedHistoryCountRef = useRef(0);
+  const announcedTerminalStatusRef = useRef<RunState['status'] | null>(null);
+  const announcedErrorRef = useRef<string | null>(null);
+
+  const appendMessage = (
+    role: ChatMessage['role'],
+    text: string,
+    timestamp = Date.now(),
+  ): void => {
+    setMessages((current) => [
+      ...current,
+      {
+        id: `${timestamp}-${current.length}`,
+        role,
+        text,
+        timestamp,
+      },
+    ]);
+  };
 
   const stopPolling = (): void => {
     if (pollTimerRef.current !== null) {
@@ -105,6 +139,11 @@ function App() {
   ): Promise<void> => {
     stopPolling();
     setRequestError(null);
+    setRunState(null);
+    setRunId(null);
+    reportedHistoryCountRef.current = 0;
+    announcedTerminalStatusRef.current = null;
+    announcedErrorRef.current = null;
 
     try {
       const requestBody = StartRunRequestSchema.parse({
@@ -128,12 +167,18 @@ function App() {
       );
 
       setRunId(payload.runId);
+      appendMessage('user', goal);
+      appendMessage(
+        'system',
+        `Sent to backend. Run ${payload.runId} is starting now.`,
+      );
       await loadRun(payload.runId);
       startPolling(payload.runId);
     } catch (error) {
       const message = error instanceof Error ? error.message : failureMessage;
       setIsPolling(false);
       setRequestError(message);
+      appendMessage('system', message);
     }
   };
 
@@ -179,6 +224,52 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!runState) {
+      return;
+    }
+
+    if (runState.history.length > reportedHistoryCountRef.current) {
+      const newEntries = runState.history.slice(reportedHistoryCountRef.current);
+      newEntries.forEach((entry) => {
+        appendMessage(
+          'assistant',
+          `Step ${entry.index + 1}: ${entry.note ?? summarizeAction(entry.action)}`,
+          entry.ts,
+        );
+      });
+      reportedHistoryCountRef.current = runState.history.length;
+    }
+
+    if (
+      terminalStatuses.has(runState.status) &&
+      announcedTerminalStatusRef.current !== runState.status
+    ) {
+      const completionMessage =
+        runState.status === 'success'
+          ? 'Run completed successfully.'
+          : runState.status === 'fail'
+            ? `Run failed${runState.error ? `: ${runState.error}` : '.'}`
+            : 'Run stopped.';
+      appendMessage('system', completionMessage, runState.updatedAt);
+      announcedTerminalStatusRef.current = runState.status;
+    }
+
+    if (runState.error && announcedErrorRef.current !== runState.error) {
+      appendMessage('system', `Error: ${runState.error}`, runState.updatedAt);
+      announcedErrorRef.current = runState.error;
+    }
+  }, [runState]);
+
+  useEffect(() => {
+    if (!requestError || announcedErrorRef.current === requestError) {
+      return;
+    }
+
+    appendMessage('system', `Request error: ${requestError}`);
+    announcedErrorRef.current = requestError;
+  }, [requestError]);
+
   const isRunning = runState?.status === 'running';
   const isActive = isRunning || isPolling;
   const latestEntry =
@@ -191,67 +282,91 @@ function App() {
 
   return (
     <main className="app-shell">
-      <section className="control-panel">
-        <header className="panel-header">
-          <div>
-            <p className="eyebrow">Step 3</p>
-            <h1>ReplayPilot Controller</h1>
-            <p className="subtitle">
-              Submit a goal, then monitor step-by-step screenshots and action logs.
-            </p>
-          </div>
-          <div>
+      <section className="controller-layout">
+        <section className="chat-panel">
+          <header className="chat-header">
+            <div>
+              <p className="eyebrow">Step 3</p>
+              <h1>ReplayPilot Chat</h1>
+              <p className="subtitle">
+                Send instructions like a normal chat, and watch execution updates stream into the conversation.
+              </p>
+            </div>
+            {isActive ? (
+              <div className="live-indicator" aria-live="polite">
+                <span className="spinner" aria-hidden="true" />
+                <span>{isRunning ? 'Processing' : 'Refreshing'}</span>
+              </div>
+            ) : null}
+          </header>
+
+          <section className="message-list" aria-label="Chat messages">
+            {messages.map((message) => (
+              <article
+                key={message.id}
+                className={`message-bubble message-${message.role}`}
+              >
+                <p className="message-role">
+                  {message.role === 'user'
+                    ? 'You'
+                    : message.role === 'assistant'
+                      ? 'ReplayPilot'
+                      : 'System'}
+                </p>
+                <p className="message-text">{message.text}</p>
+                <p className="message-time">
+                  {new Date(message.timestamp).toLocaleTimeString()}
+                </p>
+              </article>
+            ))}
+          </section>
+
+          <section className="composer-card">
             <label className="eyebrow" htmlFor="goal-input">
-              Goal
+              Message
             </label>
             <textarea
               id="goal-input"
-              className="json-block"
-              rows={3}
+              className="composer-input"
+              rows={4}
               value={goal}
               onChange={(event) => {
                 setGoal(event.target.value);
               }}
+              placeholder="Tell ReplayPilot what to do next..."
             />
-          </div>
-          <div className="button-row">
-            <button type="button" onClick={() => void handleRunClick()}>
-              Start Run
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleComputerUseClick()}
-            >
-              Start Computer Use
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleStopClick()}
-              disabled={!isRunning}
-            >
-              Stop
-            </button>
-          </div>
-        </header>
+            <div className="button-row">
+              <button type="button" onClick={() => void handleRunClick()}>
+                Send
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleComputerUseClick()}
+              >
+                Send Computer Use
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleStopClick()}
+                disabled={!isRunning}
+              >
+                Stop
+              </button>
+            </div>
+          </section>
+        </section>
 
-        <section className="status-grid">
-          <div className="status-card">
+        <aside className="status-panel">
+          <section className="status-card">
             <div className="card-title-row">
-              <h2>Run State</h2>
-              {isActive ? (
-                <div className="live-indicator" aria-live="polite">
-                  <span className="spinner" aria-hidden="true" />
-                  <span>
-                    {isRunning ? 'Waiting for next step' : 'Refreshing'}
-                  </span>
-                </div>
-              ) : null}
+              <h2>Processing Status</h2>
+              <span className="step-counter">
+                {runState
+                  ? `${runState.history.length} updates`
+                  : 'Waiting for input'}
+              </span>
             </div>
             <dl className="detail-list">
-              <div>
-                <dt>Goal</dt>
-                <dd>{runState?.goal ?? goal}</dd>
-              </div>
               <div>
                 <dt>Status</dt>
                 <dd>{runState?.status ?? 'idle'}</dd>
@@ -265,8 +380,16 @@ function App() {
                 <dd>{runState?.step ?? 0}</dd>
               </div>
               <div>
-                <dt>Updated At</dt>
+                <dt>Updated</dt>
                 <dd>{formatTimestamp(runState?.updatedAt)}</dd>
+              </div>
+              <div>
+                <dt>Current Intent</dt>
+                <dd>{latestEntry?.note ?? 'none yet'}</dd>
+              </div>
+              <div>
+                <dt>Error</dt>
+                <dd>{runState?.error ?? requestError ?? 'none'}</dd>
               </div>
               <div>
                 <dt>Last Action</dt>
@@ -278,24 +401,14 @@ function App() {
                   </pre>
                 </dd>
               </div>
-              <div>
-                <dt>Current Intent</dt>
-                <dd>{latestEntry?.note ?? 'none yet'}</dd>
-              </div>
-              <div>
-                <dt>Error</dt>
-                <dd>{runState?.error ?? requestError ?? 'none'}</dd>
-              </div>
             </dl>
-          </div>
+          </section>
 
-          <div className="status-card">
+          <section className="status-card">
             <div className="card-title-row">
-              <h2>Screenshot</h2>
+              <h2>Latest Screenshot</h2>
               <span className="step-counter">
-                {runState
-                  ? `${runState.history.length} logged steps`
-                  : '0 logged steps'}
+                {runState?.status ?? 'idle'}
               </span>
             </div>
             {screenshotUrl ? (
@@ -316,42 +429,10 @@ function App() {
                 ) : null}
               </div>
             ) : (
-              <p className="empty-state">no screenshot yet</p>
+              <p className="empty-state">No screenshot yet.</p>
             )}
-          </div>
-        </section>
-
-        <section className="status-card history-card">
-          <div className="card-title-row">
-            <h2>Step Log</h2>
-            <span className="step-counter">
-              {runState?.history.length ?? 0} total entries
-            </span>
-          </div>
-          {runState?.history.length ? (
-            <ol className="history-list">
-              {runState.history.map((entry) => (
-                <li className="history-item" key={`${entry.index}-${entry.ts}`}>
-                  <div className="history-topline">
-                    <strong>Step {entry.index + 1}</strong>
-                    <span>{formatTimestamp(entry.ts)}</span>
-                  </div>
-                  <p className="history-summary">
-                    {entry.note ?? summarizeAction(entry.action)}
-                  </p>
-                  <pre className="json-block history-json">
-                    {JSON.stringify(entry.action, null, 2)}
-                  </pre>
-                  <p className="history-meta">
-                    Screenshot: {entry.screenshotName ?? 'none'}
-                  </p>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="empty-state">No steps recorded yet.</p>
-          )}
-        </section>
+          </section>
+        </aside>
       </section>
     </main>
   );

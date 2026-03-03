@@ -1,9 +1,10 @@
 :root {
   font-family: 'Segoe UI', sans-serif;
-  color: #122236;
+  color: #16263a;
   background:
-    radial-gradient(circle at top right, rgba(155, 204, 255, 0.45), transparent 35%),
-    linear-gradient(180deg, #eef4f9 0%, #d8e4ef 100%);
+    radial-gradient(circle at top right, rgba(89, 168, 255, 0.28), transparent 36%),
+    radial-gradient(circle at bottom left, rgba(255, 209, 147, 0.35), transparent 34%),
+    linear-gradient(180deg, #edf4f8 0%, #dbe5ee 100%);
 }
 
 * {
@@ -24,26 +25,142 @@ body {
   padding: 24px;
   display: flex;
   justify-content: center;
-  align-items: flex-start;
+  align-items: stretch;
 }
 
-.control-panel {
-  width: min(100%, 1100px);
+.controller-layout {
+  width: min(100%, 1240px);
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
+  gap: 22px;
 }
 
-.panel-header {
+.chat-panel,
+.status-panel {
+  min-width: 0;
+}
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.chat-header {
+  padding: 28px 32px;
+  border-radius: 28px;
+  background: rgba(247, 251, 255, 0.82);
+  border: 1px solid rgba(112, 141, 168, 0.14);
+  box-shadow: 0 24px 60px rgba(22, 38, 58, 0.1);
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  align-items: flex-end;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.message-list {
+  padding: 24px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(112, 141, 168, 0.14);
+  box-shadow: 0 24px 60px rgba(22, 38, 58, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 460px;
+  max-height: 62vh;
+  overflow-y: auto;
+}
+
+.message-bubble {
+  max-width: min(82%, 620px);
+  padding: 14px 16px;
+  border-radius: 20px;
+}
+
+.message-user {
+  margin-left: auto;
+  background: linear-gradient(135deg, #0c66d6, #0a7ff2);
+  color: #fff;
+  border-bottom-right-radius: 6px;
+  box-shadow: 0 14px 28px rgba(12, 102, 214, 0.24);
+}
+
+.message-assistant,
+.message-system {
+  margin-right: auto;
+  border-bottom-left-radius: 6px;
+}
+
+.message-assistant {
+  background: #eef5fb;
+  border: 1px solid #d7e3ee;
+}
+
+.message-system {
+  background: #fff7e8;
+  border: 1px solid #eed7a8;
+}
+
+.message-role,
+.message-time,
+.message-text {
+  margin: 0;
+}
+
+.message-role {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.message-text {
+  margin-top: 8px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.message-time {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  opacity: 0.7;
+}
+
+.composer-card {
+  padding: 24px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(112, 141, 168, 0.14);
+  box-shadow: 0 24px 60px rgba(22, 38, 58, 0.1);
+}
+
+.composer-input {
+  width: 100%;
+  margin: 0;
+  border: 1px solid #d5e0ea;
+  border-radius: 18px;
+  background: #f4f8fb;
+  padding: 16px;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: inherit;
+  resize: vertical;
+}
+
+.status-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
 .button-row {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+  margin-top: 16px;
 }
 
 button {
@@ -71,14 +188,11 @@ button:disabled {
 }
 
 .status-card {
-  padding: 40px;
-  border-radius: 20px;
+  padding: 28px;
+  border-radius: 28px;
   background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 20px 50px rgba(19, 34, 56, 0.12);
-}
-
-.history-card {
-  margin-top: 20px;
+  border: 1px solid rgba(112, 141, 168, 0.14);
+  box-shadow: 0 24px 60px rgba(22, 38, 58, 0.1);
 }
 
 .eyebrow {
@@ -136,7 +250,7 @@ h2 {
 
 .detail-list > div {
   display: grid;
-  grid-template-columns: 120px 1fr;
+  grid-template-columns: 104px 1fr;
   gap: 12px;
   padding: 10px 0;
   border-bottom: 1px solid #d8e2ec;
@@ -261,16 +375,31 @@ dd {
 }
 
 @media (max-width: 900px) {
-  .status-grid {
+  .controller-layout {
     grid-template-columns: 1fr;
   }
 
-  .status-card {
+  .chat-header {
+    flex-direction: column;
+  }
+
+  .status-card,
+  .message-list,
+  .composer-card {
     padding: 28px;
+  }
+
+  .message-list {
+    min-height: 360px;
+    max-height: none;
   }
 
   .detail-list > div {
     grid-template-columns: 1fr;
     gap: 6px;
+  }
+
+  .message-bubble {
+    max-width: 100%;
   }
 }
