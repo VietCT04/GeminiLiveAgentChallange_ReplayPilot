@@ -336,7 +336,7 @@ const mapFunctionCallToPlannerOutput = (
   const args = functionCall.args ?? {};
   const lowerName = name.toLowerCase();
 
-  if (lowerName === 'open_web_browser' || lowerName === 'navigate') {
+  if (lowerName === 'open_web_browser') {
     if (history.length > 0) {
       return {
         summary: 'Browser is already open',
@@ -346,7 +346,9 @@ const mapFunctionCallToPlannerOutput = (
         },
       };
     }
+  }
 
+  if (lowerName === 'open_web_browser' || lowerName === 'navigate') {
     const explicitUrl = readString(args.url, args.uri);
     const inferredUrl = inferStartUrlFromGoal(goal);
     const url = explicitUrl ?? inferredUrl;
