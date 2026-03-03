@@ -84,6 +84,81 @@ export type PlannerDebugPayload = {
   response: PlannerResponseLog;
 };
 
+const normalizeToolCallName = (
+  name: string,
+): {
+  normalizedName: string;
+  impliedArgs?: Record<string, unknown>;
+} => {
+  const lowerName = name.toLowerCase();
+  const waitSecondsMatch = lowerName.match(/^wait_(\d+)_seconds?$/);
+
+  if (waitSecondsMatch?.[1]) {
+    return {
+      normalizedName: 'wait',
+      impliedArgs: {
+        seconds: Number(waitSecondsMatch[1]),
+      },
+    };
+  }
+
+  switch (lowerName) {
+    case 'open_browser':
+    case 'launch_browser':
+      return { normalizedName: 'open_web_browser' };
+    case 'go_to':
+    case 'goto':
+    case 'open_url':
+      return { normalizedName: 'navigate' };
+    case 'left_click':
+    case 'single_click':
+    case 'click_element':
+      return { normalizedName: 'click' };
+    case 'double_click':
+      return {
+        normalizedName: 'click',
+        impliedArgs: {
+          clicks: 2,
+        },
+      };
+    case 'right_click':
+      return {
+        normalizedName: 'click',
+        impliedArgs: {
+          button: 'right',
+        },
+      };
+    case 'type_into':
+    case 'enter_text':
+    case 'input_text':
+      return { normalizedName: 'type' };
+    case 'press_enter':
+    case 'hit_enter':
+      return {
+        normalizedName: 'press_key',
+        impliedArgs: {
+          key: 'Enter',
+        },
+      };
+    case 'scroll_down':
+      return {
+        normalizedName: 'scroll',
+        impliedArgs: {
+          deltaY: 600,
+        },
+      };
+    case 'scroll_up':
+      return {
+        normalizedName: 'scroll',
+        impliedArgs: {
+          deltaY: -600,
+        },
+      };
+    default:
+      return { normalizedName: lowerName };
+  }
+};
+
 const getClient = (): GoogleGenAI => {
   const apiKey = process.env.GOOGLE_API_KEY;
 
@@ -333,8 +408,12 @@ const mapFunctionCallToPlannerOutput = (
   functionCall: { name?: string; args?: Record<string, unknown> },
 ): PlannerOutput => {
   const name = functionCall.name ?? '';
-  const args = functionCall.args ?? {};
-  const lowerName = name.toLowerCase();
+  const normalized = normalizeToolCallName(name);
+  const args = {
+    ...(functionCall.args ?? {}),
+    ...(normalized.impliedArgs ?? {}),
+  };
+  const lowerName = normalized.normalizedName;
 
   if (lowerName === 'open_web_browser') {
     if (history.length > 0) {

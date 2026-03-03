@@ -51,6 +51,105 @@ const sleep = async (ms: number): Promise<void> => {
   });
 };
 
+const normalizeToolCall = (
+  toolCall: ComputerUseToolCall,
+): ComputerUseToolCall => {
+  const lowerName = (toolCall.name ?? '').toLowerCase();
+  const waitSecondsMatch = lowerName.match(/^wait_(\d+)_seconds?$/);
+
+  if (waitSecondsMatch?.[1]) {
+    return {
+      ...toolCall,
+      name: 'wait',
+      args: {
+        ...(toolCall.args ?? {}),
+        seconds: Number(waitSecondsMatch[1]),
+      },
+    };
+  }
+
+  switch (lowerName) {
+    case 'open_browser':
+    case 'launch_browser':
+      return {
+        ...toolCall,
+        name: 'open_web_browser',
+      };
+    case 'go_to':
+    case 'goto':
+    case 'open_url':
+      return {
+        ...toolCall,
+        name: 'navigate',
+      };
+    case 'left_click':
+    case 'single_click':
+    case 'click_element':
+      return {
+        ...toolCall,
+        name: 'click',
+      };
+    case 'double_click':
+      return {
+        ...toolCall,
+        name: 'click',
+        args: {
+          ...(toolCall.args ?? {}),
+          clicks: 2,
+        },
+      };
+    case 'right_click':
+      return {
+        ...toolCall,
+        name: 'click',
+        args: {
+          ...(toolCall.args ?? {}),
+          button: 'right',
+        },
+      };
+    case 'type_into':
+    case 'enter_text':
+    case 'input_text':
+      return {
+        ...toolCall,
+        name: 'type',
+      };
+    case 'press_enter':
+    case 'hit_enter':
+      return {
+        ...toolCall,
+        name: 'press_key',
+        args: {
+          ...(toolCall.args ?? {}),
+          key: 'Enter',
+        },
+      };
+    case 'scroll_down':
+      return {
+        ...toolCall,
+        name: 'scroll',
+        args: {
+          ...(toolCall.args ?? {}),
+          deltaY: 600,
+        },
+      };
+    case 'scroll_up':
+      return {
+        ...toolCall,
+        name: 'scroll',
+        args: {
+          ...(toolCall.args ?? {}),
+          deltaY: -600,
+        },
+      };
+    default:
+      return {
+        ...toolCall,
+        name: lowerName,
+      };
+  }
+};
+
 const denormalizeCoordinate = (
   value: number,
   size: number,
@@ -308,8 +407,9 @@ const executeComputerUseToolCall = async (
   goal: string,
   toolCall: ComputerUseToolCall,
 ): Promise<void> => {
-  const name = (toolCall.name ?? '').toLowerCase();
-  const args = toolCall.args ?? {};
+  const normalizedToolCall = normalizeToolCall(toolCall);
+  const name = (normalizedToolCall.name ?? '').toLowerCase();
+  const args = normalizedToolCall.args ?? {};
 
   switch (name) {
     case 'open_web_browser':
