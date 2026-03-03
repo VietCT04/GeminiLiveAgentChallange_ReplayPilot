@@ -68,6 +68,7 @@ function App() {
   const reportedHistoryCountRef = useRef(0);
   const announcedTerminalStatusRef = useRef<RunState['status'] | null>(null);
   const announcedErrorRef = useRef<string | null>(null);
+  const announcedHandoffRef = useRef<string | null>(null);
 
   const appendMessage = (
     role: ChatMessage['role'],
@@ -144,6 +145,7 @@ function App() {
     reportedHistoryCountRef.current = 0;
     announcedTerminalStatusRef.current = null;
     announcedErrorRef.current = null;
+    announcedHandoffRef.current = null;
 
     try {
       const requestBody = StartRunRequestSchema.parse({
@@ -218,6 +220,35 @@ function App() {
     }
   };
 
+  const handleResumeClick = async (): Promise<void> => {
+    if (!runId) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/runs/${runId}/resume`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to resume run ${runId}`);
+      }
+
+      const payload = RunStateSchema.parse((await response.json()) as unknown);
+      setRunState(payload);
+      setRequestError(null);
+      announcedHandoffRef.current = null;
+      appendMessage(
+        'system',
+        'Run resumed. If the CAPTCHA is still visible, solve it first and the agent will pause again.',
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to resume run';
+      setRequestError(message);
+    }
+  };
+
   useEffect(() => {
     return () => {
       stopPolling();
@@ -255,6 +286,19 @@ function App() {
       announcedTerminalStatusRef.current = runState.status;
     }
 
+    if (
+      runState.status === 'waiting_for_human' &&
+      runState.handoff &&
+      announcedHandoffRef.current !== runState.handoff.screenshotUrl
+    ) {
+      appendMessage(
+        'system',
+        `CAPTCHA detected. Solve it in the browser, then press Resume. Current page: ${runState.handoff.url}`,
+        runState.updatedAt,
+      );
+      announcedHandoffRef.current = runState.handoff.screenshotUrl ?? 'handoff';
+    }
+
     if (runState.error && announcedErrorRef.current !== runState.error) {
       appendMessage('system', `Error: ${runState.error}`, runState.updatedAt);
       announcedErrorRef.current = runState.error;
@@ -271,7 +315,8 @@ function App() {
   }, [requestError]);
 
   const isRunning = runState?.status === 'running';
-  const isActive = isRunning || isPolling;
+  const isWaitingForHuman = runState?.status === 'waiting_for_human';
+  const isActive = isRunning || isPolling || isWaitingForHuman;
   const latestEntry =
     runState && runState.history.length > 0
       ? runState.history[runState.history.length - 1]
@@ -295,7 +340,13 @@ function App() {
             {isActive ? (
               <div className="live-indicator" aria-live="polite">
                 <span className="spinner" aria-hidden="true" />
-                <span>{isRunning ? 'Processing' : 'Refreshing'}</span>
+                <span>
+                  {isRunning
+                    ? 'Processing'
+                    : isWaitingForHuman
+                      ? 'Waiting For Human'
+                      : 'Refreshing'}
+                </span>
               </div>
             ) : null}
           </header>
@@ -347,8 +398,15 @@ function App() {
               </button>
               <button
                 type="button"
+                onClick={() => void handleResumeClick()}
+                disabled={!isWaitingForHuman}
+              >
+                Resume
+              </button>
+              <button
+                type="button"
                 onClick={() => void handleStopClick()}
-                disabled={!isRunning}
+                disabled={!isRunning && !isWaitingForHuman}
               >
                 Stop
               </button>
@@ -390,6 +448,14 @@ function App() {
               <div>
                 <dt>Error</dt>
                 <dd>{runState?.error ?? requestError ?? 'none'}</dd>
+              </div>
+              <div>
+                <dt>Handoff</dt>
+                <dd>
+                  {runState?.handoff
+                    ? `${runState.handoff.reason} at ${runState.handoff.url}`
+                    : 'none'}
+                </dd>
               </div>
               <div>
                 <dt>Last Action</dt>

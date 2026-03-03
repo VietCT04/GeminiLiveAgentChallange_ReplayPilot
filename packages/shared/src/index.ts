@@ -73,12 +73,25 @@ export type Action = z.infer<typeof ActionSchema>;
 export const RunStatusSchema = z.enum([
   'queued',
   'running',
+  'waiting_for_human',
   'success',
   'fail',
   'stopped',
 ]);
 
 export type RunStatus = z.infer<typeof RunStatusSchema>;
+
+export const HumanHandoffReasonSchema = z.enum(['CAPTCHA_DETECTED']);
+
+export type HumanHandoffReason = z.infer<typeof HumanHandoffReasonSchema>;
+
+export const HumanHandoffSchema = z.object({
+  reason: HumanHandoffReasonSchema,
+  url: z.string(),
+  screenshotUrl: z.string().optional(),
+});
+
+export type HumanHandoff = z.infer<typeof HumanHandoffSchema>;
 
 export const StepRecordSchema = z.object({
   index: z.number().int().nonnegative(),
@@ -100,6 +113,7 @@ export const RunStateSchema = z.object({
   lastAction: ActionSchema.optional(),
   lastScreenshotUrl: z.string().optional(),
   error: z.string().optional(),
+  handoff: HumanHandoffSchema.optional(),
   history: z.array(StepRecordSchema),
 });
 

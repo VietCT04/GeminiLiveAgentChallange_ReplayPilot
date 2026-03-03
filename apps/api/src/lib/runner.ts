@@ -45,6 +45,12 @@ const wait = async (page: Page, ms: number): Promise<void> => {
   await page.waitForTimeout(ms);
 };
 
+const sleep = async (ms: number): Promise<void> => {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+};
+
 const denormalizeCoordinate = (
   value: number,
   size: number,
@@ -517,6 +523,113 @@ const writePlannerDebugFiles = async (
   );
 };
 
+const detectCaptchaReason = async (page: Page): Promise<string | null> => {
+  const frameHasCaptcha = page.frames().some((frame) => {
+    const url = frame.url().toLowerCase();
+    return url.includes('recaptcha') || url.includes('hcaptcha');
+  });
+
+  if (frameHasCaptcha) {
+    return 'captcha frame detected';
+  }
+
+  const pageSignals = await page.evaluate(() => {
+    const selectorMatches = [
+      'iframe[src*="recaptcha"]',
+      'iframe[src*="hcaptcha"]',
+      '.g-recaptcha',
+      '.h-captcha',
+      '[id*="captcha" i]',
+      '[class*="captcha" i]',
+      '[name*="captcha" i]',
+      '[title*="captcha" i]',
+    ].some((selector) => document.querySelector(selector) !== null);
+    const bodyText = document.body?.innerText?.toLowerCase() ?? '';
+    const textMatches =
+      bodyText.includes("i'm not a robot") ||
+      bodyText.includes('im not a robot') ||
+      bodyText.includes('verify you are human') ||
+      bodyText.includes('verify that you are human') ||
+      bodyText.includes('complete the captcha') ||
+      bodyText.includes('security check') ||
+      bodyText.includes('captcha');
+
+    return {
+      selectorMatches,
+      textMatches,
+    };
+  });
+
+  if (pageSignals.selectorMatches) {
+    return 'captcha selector detected';
+  }
+
+  if (pageSignals.textMatches) {
+    return 'captcha challenge text detected';
+  }
+
+  return null;
+};
+
+const waitForRunResume = async (
+  runId: string,
+): Promise<'running' | 'stopped'> => {
+  for (;;) {
+    const runState = await getRun(runId);
+
+    if (runState.status === 'running') {
+      return 'running';
+    }
+
+    if (runState.status === 'stopped') {
+      return 'stopped';
+    }
+
+    await sleep(1000);
+  }
+};
+
+const pauseForCaptchaIfDetected = async (
+  runId: string,
+  page: Page,
+  log: { info: (context: object, message: string) => void },
+): Promise<boolean> => {
+  for (;;) {
+    const reason = await detectCaptchaReason(page);
+
+    if (!reason) {
+      return false;
+    }
+
+    const handoffScreenshotName = `handoff_captcha_${Date.now()}.png`;
+    const handoffScreenshotPath = resolveArtifactPath(runId, handoffScreenshotName);
+    await page.screenshot({
+      path: handoffScreenshotPath,
+      fullPage: false,
+    });
+
+    const screenshotUrl = `/runs/${runId}/artifacts/${handoffScreenshotName}`;
+    await updateRun(runId, {
+      status: 'waiting_for_human',
+      updatedAt: Date.now(),
+      lastScreenshotUrl: screenshotUrl,
+      handoff: {
+        reason: 'CAPTCHA_DETECTED',
+        url: page.url(),
+        screenshotUrl,
+      },
+    });
+    log.info({ runId, reason, url: page.url() }, 'Paused run for CAPTCHA handoff');
+
+    const resumeStatus = await waitForRunResume(runId);
+
+    if (resumeStatus === 'stopped') {
+      log.info({ runId }, 'Run stopped during human handoff');
+      return true;
+    }
+  }
+};
+
 export const runSequence = async (
   runId: string,
   log: { info: (context: object, message: string) => void },
@@ -534,6 +647,10 @@ export const runSequence = async (
     for (let index = startIndex; index < MAX_STEPS; index += 1) {
       if (await shouldStop(runId)) {
         log.info({ runId }, 'Run stopped before planning next action');
+        break;
+      }
+
+      if (await pauseForCaptchaIfDetected(runId, page, log)) {
         break;
       }
 
@@ -621,6 +738,10 @@ export const runComputerUseSequence = async (
     for (let index = startIndex; index < MAX_STEPS; index += 1) {
       if (await shouldStop(runId)) {
         log.info({ runId }, 'Computer Use run stopped before planning next action');
+        break;
+      }
+
+      if (await pauseForCaptchaIfDetected(runId, page, log)) {
         break;
       }
 

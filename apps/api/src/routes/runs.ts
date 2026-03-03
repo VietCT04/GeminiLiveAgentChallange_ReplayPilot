@@ -157,4 +157,25 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
       }
     },
   );
+
+  app.post<{ Params: { runId: string } }>(
+    '/:runId/resume',
+    async (request, reply) => {
+      try {
+        const runState = await updateRun(request.params.runId, {
+          status: 'running',
+          updatedAt: Date.now(),
+          handoff: undefined,
+        });
+
+        app.log.info({ runId: runState.runId }, 'Resumed run');
+        return reply.send(runState);
+      } catch (error) {
+        if (isNotFoundError(error)) {
+          return sendNotFound(reply);
+        }
+        throw error;
+      }
+    },
+  );
 };
