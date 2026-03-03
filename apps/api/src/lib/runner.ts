@@ -20,6 +20,7 @@ import {
 const MAX_STEPS = 30;
 const NAVIGATION_TIMEOUT_MS = 15000;
 const STEP_SETTLE_MS = 800;
+const DEFAULT_START_URL = 'https://www.google.com/';
 const VIEWPORT = {
   width: 1280,
   height: 720,
@@ -474,6 +475,31 @@ const captureActionStep = async (
   });
 };
 
+const initializeDefaultStartPage = async (
+  runId: string,
+  page: Page,
+): Promise<number> => {
+  const action: Action = {
+    type: 'navigate',
+    url: DEFAULT_START_URL,
+  };
+
+  await page.goto(DEFAULT_START_URL, {
+    waitUntil: 'domcontentloaded',
+    timeout: NAVIGATION_TIMEOUT_MS,
+  });
+  await wait(page, STEP_SETTLE_MS);
+  await captureActionStep(
+    runId,
+    page,
+    0,
+    action,
+    'Opened Google automatically as the start page',
+  );
+
+  return 1;
+};
+
 const writePlannerDebugFiles = async (
   runId: string,
   index: number,
@@ -503,8 +529,9 @@ export const runSequence = async (
       viewport: VIEWPORT,
     });
     const page = await context.newPage();
+    const startIndex = await initializeDefaultStartPage(runId, page);
 
-    for (let index = 0; index < MAX_STEPS; index += 1) {
+    for (let index = startIndex; index < MAX_STEPS; index += 1) {
       if (await shouldStop(runId)) {
         log.info({ runId }, 'Run stopped before planning next action');
         break;
@@ -589,8 +616,9 @@ export const runComputerUseSequence = async (
       viewport: VIEWPORT,
     });
     const page = await context.newPage();
+    const startIndex = await initializeDefaultStartPage(runId, page);
 
-    for (let index = 0; index < MAX_STEPS; index += 1) {
+    for (let index = startIndex; index < MAX_STEPS; index += 1) {
       if (await shouldStop(runId)) {
         log.info({ runId }, 'Computer Use run stopped before planning next action');
         break;

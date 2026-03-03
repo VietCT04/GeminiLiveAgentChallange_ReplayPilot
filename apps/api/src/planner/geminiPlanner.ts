@@ -337,6 +337,16 @@ const mapFunctionCallToPlannerOutput = (
   const lowerName = name.toLowerCase();
 
   if (lowerName === 'open_web_browser' || lowerName === 'navigate') {
+    if (history.length > 0) {
+      return {
+        summary: 'Browser is already open',
+        action: {
+          type: 'wait',
+          ms: 500,
+        },
+      };
+    }
+
     const explicitUrl = readString(args.url, args.uri);
     const inferredUrl = inferStartUrlFromGoal(goal);
     const url = explicitUrl ?? inferredUrl;
@@ -515,6 +525,7 @@ const buildPrompt = (
   return [
     'You are controlling a browser with the built-in Computer Use tool.',
     'Use the current screenshot and recent actions to decide the next step.',
+    'The browser is already open and starts on https://www.google.com/ before your first planned step.',
     'Do not call open_web_browser again if the browser is already open on the target site.',
     'After opening the site, prefer click_at, type_text, press_key, scroll_by, or wait.',
     'For click_at and type_text_at, use normalized coordinates from 0 to 1000 on both axes.',
