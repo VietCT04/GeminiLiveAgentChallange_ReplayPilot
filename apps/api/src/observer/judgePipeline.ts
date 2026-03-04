@@ -15,13 +15,13 @@ const JudgeVerdictSchema = z.enum([
 ]);
 
 const JudgeEvidenceSchema = z.object({
-  text: z.string().min(1).max(160),
-  region: z.string().min(1).max(80).optional(),
+  text: z.string().min(1),
+  region: z.string().min(1).optional(),
 });
 
 const VisionJudgeSchema = z.object({
   verdict: JudgeVerdictSchema,
-  reasons: z.array(z.string().min(1).max(2000)).min(1).max(5),
+  reasons: z.array(z.string().min(1)).min(1).max(5),
   evidence: z.array(JudgeEvidenceSchema).max(5),
 });
 
