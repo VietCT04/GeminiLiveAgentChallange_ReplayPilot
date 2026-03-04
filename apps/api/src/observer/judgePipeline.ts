@@ -21,7 +21,7 @@ const JudgeEvidenceSchema = z.object({
 
 const VisionJudgeSchema = z.object({
   verdict: JudgeVerdictSchema,
-  reasons: z.array(z.string().min(1).max(160)).min(1).max(5),
+  reasons: z.array(z.string().min(1).max(2000)).min(1).max(5),
   evidence: z.array(JudgeEvidenceSchema).max(5),
 });
 
@@ -58,7 +58,8 @@ export type JudgeVerdict = z.infer<typeof JudgeVerdictSchema>;
 export type JudgeEvaluation = {
   verdict: JudgeVerdict;
   handoffReason?: HumanHandoffReason;
-  reasons: string[];
+  reasonsFull: string[];
+  reasonsUi: string[];
   evidence: Array<z.infer<typeof JudgeEvidenceSchema>>;
   screenshotHash: string;
   screenshotChanged: boolean;
@@ -88,6 +89,20 @@ const getClient = (): GoogleGenAI => {
 
 const hashScreenshot = (screenshotBytes: Buffer): string => {
   return createHash('sha256').update(screenshotBytes).digest('hex');
+};
+
+const MAX_UI_REASON_LENGTH = 160;
+
+const toUiReason = (reason: string): string => {
+  if (reason.length <= MAX_UI_REASON_LENGTH) {
+    return reason;
+  }
+
+  return `${reason.slice(0, MAX_UI_REASON_LENGTH - 3).trimEnd()}...`;
+};
+
+const toUiReasons = (reasons: string[]): string[] => {
+  return reasons.map(toUiReason);
 };
 
 export const requiresSafetyConfirmation = (stepCriteria: string): boolean => {
@@ -168,7 +183,8 @@ export const evaluateStep = async (
     return {
       verdict: 'WAITING_FOR_HUMAN',
       handoffReason: 'CAPTCHA_DETECTED',
-      reasons: ['CAPTCHA detected by visual state detector'],
+      reasonsFull: ['CAPTCHA detected by visual state detector'],
+      reasonsUi: ['CAPTCHA detected by visual state detector'],
       evidence: stateDetection.blockers.map((blocker) => ({
         text: blocker.reason,
       })),
@@ -184,7 +200,8 @@ export const evaluateStep = async (
   if (visionJudge.verdict === 'PASS') {
     return {
       verdict: 'PASS',
-      reasons: visionJudge.reasons,
+      reasonsFull: visionJudge.reasons,
+      reasonsUi: toUiReasons(visionJudge.reasons),
       evidence: visionJudge.evidence,
       screenshotHash,
       screenshotChanged,
@@ -197,7 +214,8 @@ export const evaluateStep = async (
     return {
       verdict: 'WAITING_FOR_HUMAN',
       handoffReason: 'CAPTCHA_DETECTED',
-      reasons: visionJudge.reasons,
+      reasonsFull: visionJudge.reasons,
+      reasonsUi: toUiReasons(visionJudge.reasons),
       evidence: visionJudge.evidence,
       screenshotHash,
       screenshotChanged,
@@ -209,7 +227,8 @@ export const evaluateStep = async (
   if (visionJudge.verdict === 'FAIL') {
     return {
       verdict: 'FAIL',
-      reasons: visionJudge.reasons,
+      reasonsFull: visionJudge.reasons,
+      reasonsUi: toUiReasons(visionJudge.reasons),
       evidence: visionJudge.evidence,
       screenshotHash,
       screenshotChanged,
@@ -221,7 +240,8 @@ export const evaluateStep = async (
   if (screenshotChanged || urlChanged) {
     return {
       verdict: 'RETRY',
-      reasons: visionJudge.reasons,
+      reasonsFull: visionJudge.reasons,
+      reasonsUi: toUiReasons(visionJudge.reasons),
       evidence: visionJudge.evidence,
       screenshotHash,
       screenshotChanged,
@@ -232,7 +252,11 @@ export const evaluateStep = async (
 
   return {
     verdict: 'FAIL',
-    reasons: [...visionJudge.reasons, 'No deterministic progress signal was detected'],
+    reasonsFull: [...visionJudge.reasons, 'No deterministic progress signal was detected'],
+    reasonsUi: toUiReasons([
+      ...visionJudge.reasons,
+      'No deterministic progress signal was detected',
+    ]),
     evidence: visionJudge.evidence,
     screenshotHash,
     screenshotChanged,

@@ -818,7 +818,7 @@ const evaluateAndApplyJudge = async (
       page,
       log,
       evaluation.handoffReason ?? 'CAPTCHA_DETECTED',
-      evaluation.reasons.join('; '),
+      evaluation.reasonsUi.join('; '),
     );
 
     return {
@@ -829,7 +829,7 @@ const evaluateAndApplyJudge = async (
   }
 
   if (evaluation.verdict === 'FAIL') {
-    throw new Error(`Judge failed step: ${evaluation.reasons.join('; ')}`);
+    throw new Error(`Judge failed step: ${evaluation.reasonsUi.join('; ')}`);
   }
 
   if (
