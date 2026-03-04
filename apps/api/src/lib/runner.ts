@@ -32,13 +32,6 @@ const VIEWPORT = {
   height: 720,
 };
 
-const allowedNavigationHosts = new Set([
-  'youtube.com',
-  'www.youtube.com',
-  'consent.youtube.com',
-  'accounts.google.com',
-]);
-
 const formatStepFileName = (
   prefix: string,
   index: number,
@@ -49,6 +42,11 @@ const formatStepFileName = (
 
 const wait = async (page: Page, ms: number): Promise<void> => {
   await page.waitForTimeout(ms);
+};
+
+const clearFocusedField = async (page: Page): Promise<void> => {
+  await page.keyboard.press('Control+A');
+  await page.keyboard.press('Backspace');
 };
 
 const sleep = async (ms: number): Promise<void> => {
@@ -253,9 +251,6 @@ const ensureAllowedNavigateUrl = (urlValue: string): void => {
     throw new Error(`Planner returned invalid navigation URL: ${urlValue}`);
   }
 
-  if (!allowedNavigationHosts.has(url.hostname.toLowerCase())) {
-    throw new Error(`Blocked navigation host from planner: ${url.hostname}`);
-  }
 };
 
 const ensureAllowedNavigate = (action: Action): void => {
@@ -337,6 +332,7 @@ export const executeAction = async (page: Page, action: Action): Promise<void> =
       if (typeof action.x === 'number' && typeof action.y === 'number') {
         await page.mouse.click(action.x, action.y);
       }
+      await clearFocusedField(page);
       await page.keyboard.type(action.text, { delay: 40 });
       if (action.submit) {
         await page.keyboard.press('Enter');
@@ -475,6 +471,7 @@ const executeComputerUseToolCall = async (
         await page.mouse.click(point.x, point.y);
       }
 
+      await clearFocusedField(page);
       await page.keyboard.type(text, { delay: 40 });
 
       const shouldPressEnter =
