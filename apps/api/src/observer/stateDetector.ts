@@ -61,6 +61,74 @@ const fallbackDetection: StateDetection = {
   reason: 'invalid_detector_output',
 };
 
+const StateDetectionResponseSchema = {
+  type: 'OBJECT',
+  properties: {
+    phase: {
+      type: 'STRING',
+      enum: [
+        'landing',
+        'search_results',
+        'detail',
+        'form',
+        'checkout',
+        'auth',
+        'consent',
+        'modal_blocking',
+        'loading',
+        'error',
+        'unknown',
+      ],
+    },
+    affordances: {
+      type: 'OBJECT',
+      properties: {
+        hasSearchInput: { type: 'BOOLEAN' },
+        hasTextInputs: { type: 'BOOLEAN' },
+        hasPrimaryButton: { type: 'BOOLEAN' },
+        hasResultsList: { type: 'BOOLEAN' },
+        hasScrollableContent: { type: 'BOOLEAN' },
+        hasConfirmationMessage: { type: 'BOOLEAN' },
+      },
+      required: [
+        'hasSearchInput',
+        'hasTextInputs',
+        'hasPrimaryButton',
+        'hasResultsList',
+        'hasScrollableContent',
+        'hasConfirmationMessage',
+      ],
+    },
+    blockers: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          type: {
+            type: 'STRING',
+            enum: [
+              'consent',
+              'signin',
+              'captcha',
+              'popup',
+              'modal',
+              'interstitial',
+            ],
+          },
+          reason: {
+            type: 'STRING',
+          },
+        },
+        required: ['type', 'reason'],
+      },
+    },
+    reason: {
+      type: 'STRING',
+    },
+  },
+  required: ['phase', 'affordances', 'blockers', 'reason'],
+} as const;
+
 const getClient = (): GoogleGenAI => {
   const apiKey = process.env.GOOGLE_API_KEY;
 
@@ -102,6 +170,10 @@ export const detectState = async (
         },
       },
     ],
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: StateDetectionResponseSchema,
+    },
   });
 
   const rawText = response.text?.trim() ?? '';

@@ -15,6 +15,15 @@ declare module '@google/genai' {
               };
             }
         >;
+        config?: {
+          responseMimeType?: string;
+          responseSchema?: unknown;
+          tools?: Array<{
+            computerUse: {
+              environment: string;
+            };
+          }>;
+        };
       }): Promise<{
         text?: string;
       }>;

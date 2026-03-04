@@ -1,9 +1,15 @@
 import {
   type Action,
+  type HumanHandoffReason,
   type RunState,
   type StepRecord,
 } from '@replaypilot/shared';
 import { chromium, type Browser, type Page } from 'playwright';
+import {
+  evaluateStep,
+  requiresSafetyConfirmation,
+  type JudgeEvaluation,
+} from '../observer/judgePipeline';
 import {
   planComputerUseStepDetailed,
   planNextActionDetailed,
@@ -689,6 +695,43 @@ const waitForRunResume = async (
   }
 };
 
+const pauseForHumanHandoff = async (
+  runId: string,
+  page: Page,
+  log: { info: (context: object, message: string) => void },
+  reason: HumanHandoffReason,
+  details: string,
+): Promise<boolean> => {
+  const handoffScreenshotName = `handoff_${reason.toLowerCase()}_${Date.now()}.png`;
+  const handoffScreenshotPath = resolveArtifactPath(runId, handoffScreenshotName);
+  await page.screenshot({
+    path: handoffScreenshotPath,
+    fullPage: false,
+  });
+
+  const screenshotUrl = `/runs/${runId}/artifacts/${handoffScreenshotName}`;
+  await updateRun(runId, {
+    status: 'waiting_for_human',
+    updatedAt: Date.now(),
+    lastScreenshotUrl: screenshotUrl,
+    handoff: {
+      reason,
+      url: page.url(),
+      screenshotUrl,
+    },
+  });
+  log.info({ runId, reason, details, url: page.url() }, 'Paused run for human handoff');
+
+  const resumeStatus = await waitForRunResume(runId);
+
+  if (resumeStatus === 'stopped') {
+    log.info({ runId }, 'Run stopped during human handoff');
+    return true;
+  }
+
+  return false;
+};
+
 const pauseForCaptchaIfDetected = async (
   runId: string,
   page: Page,
@@ -701,33 +744,150 @@ const pauseForCaptchaIfDetected = async (
       return false;
     }
 
-    const handoffScreenshotName = `handoff_captcha_${Date.now()}.png`;
-    const handoffScreenshotPath = resolveArtifactPath(runId, handoffScreenshotName);
-    await page.screenshot({
-      path: handoffScreenshotPath,
-      fullPage: false,
-    });
+    const shouldStop = await pauseForHumanHandoff(
+      runId,
+      page,
+      log,
+      'CAPTCHA_DETECTED',
+      reason,
+    );
 
-    const screenshotUrl = `/runs/${runId}/artifacts/${handoffScreenshotName}`;
-    await updateRun(runId, {
-      status: 'waiting_for_human',
-      updatedAt: Date.now(),
-      lastScreenshotUrl: screenshotUrl,
-      handoff: {
-        reason: 'CAPTCHA_DETECTED',
-        url: page.url(),
-        screenshotUrl,
-      },
-    });
-    log.info({ runId, reason, url: page.url() }, 'Paused run for CAPTCHA handoff');
-
-    const resumeStatus = await waitForRunResume(runId);
-
-    if (resumeStatus === 'stopped') {
-      log.info({ runId }, 'Run stopped during human handoff');
+    if (shouldStop) {
       return true;
     }
   }
+};
+
+const writeJudgeDebugFile = async (
+  runId: string,
+  index: number,
+  evaluation: JudgeEvaluation,
+): Promise<void> => {
+  await writeArtifactJson(
+    runId,
+    formatStepFileName('judge', index, 'json'),
+    evaluation,
+  );
+};
+
+const getCurrentPlanCriteria = (runState: RunState): string => {
+  if (!runState.planSteps.length) {
+    return runState.goal;
+  }
+
+  const currentStepIndex = Math.min(
+    runState.completedPlanSteps,
+    runState.planSteps.length - 1,
+  );
+
+  return runState.planSteps[currentStepIndex] ?? runState.goal;
+};
+
+const evaluateAndApplyJudge = async (
+  runId: string,
+  page: Page,
+  currentRun: RunState,
+  index: number,
+  log: { info: (context: object, message: string) => void },
+  previousUrl: string | null,
+  previousScreenshotHash: string | null,
+): Promise<{
+  stopRun: boolean;
+  nextPreviousUrl: string;
+  nextPreviousScreenshotHash: string;
+}> => {
+  const currentUrl = page.url();
+  const screenshotBytes = await page.screenshot({
+    fullPage: false,
+  });
+  const evaluation = await evaluateStep({
+    goal: currentRun.goal,
+    stepIndex: currentRun.completedPlanSteps,
+    stepCriteria: getCurrentPlanCriteria(currentRun),
+    currentUrl,
+    previousUrl,
+    screenshotBytes,
+    previousScreenshotHash,
+  });
+
+  await writeJudgeDebugFile(runId, index, evaluation);
+
+  if (evaluation.verdict === 'WAITING_FOR_HUMAN') {
+    const shouldStop = await pauseForHumanHandoff(
+      runId,
+      page,
+      log,
+      evaluation.handoffReason ?? 'CAPTCHA_DETECTED',
+      evaluation.reasons.join('; '),
+    );
+
+    return {
+      stopRun: shouldStop,
+      nextPreviousUrl: page.url(),
+      nextPreviousScreenshotHash: evaluation.screenshotHash,
+    };
+  }
+
+  if (evaluation.verdict === 'FAIL') {
+    throw new Error(`Judge failed step: ${evaluation.reasons.join('; ')}`);
+  }
+
+  if (
+    evaluation.verdict === 'PASS' &&
+    currentRun.planSteps.length > 0 &&
+    currentRun.completedPlanSteps < currentRun.planSteps.length
+  ) {
+    await updateRun(runId, {
+      completedPlanSteps: currentRun.completedPlanSteps + 1,
+      approvedSafetyStep:
+        currentRun.approvedSafetyStep === getCurrentPlanCriteria(currentRun)
+          ? undefined
+          : currentRun.approvedSafetyStep,
+      updatedAt: Date.now(),
+    });
+  }
+
+  log.info(
+    {
+      runId,
+      step: index,
+      verdict: evaluation.verdict,
+      screenshotChanged: evaluation.screenshotChanged,
+      urlChanged: evaluation.urlChanged,
+    },
+    'Judge evaluated current step',
+  );
+
+  return {
+    stopRun: false,
+    nextPreviousUrl: currentUrl,
+    nextPreviousScreenshotHash: evaluation.screenshotHash,
+  };
+};
+
+const pauseForSafetyConfirmationIfNeeded = async (
+  runId: string,
+  page: Page,
+  currentRun: RunState,
+  log: { info: (context: object, message: string) => void },
+): Promise<boolean> => {
+  const stepCriteria = getCurrentPlanCriteria(currentRun);
+
+  if (!requiresSafetyConfirmation(stepCriteria)) {
+    return false;
+  }
+
+  if (currentRun.approvedSafetyStep === stepCriteria) {
+    return false;
+  }
+
+  return pauseForHumanHandoff(
+    runId,
+    page,
+    log,
+    'SAFETY_CONFIRMATION_PENDING',
+    `Safety confirmation required for plan step: ${stepCriteria}`,
+  );
 };
 
 export const runSequence = async (
@@ -743,6 +903,8 @@ export const runSequence = async (
     });
     const page = await context.newPage();
     const startIndex = await initializeDefaultStartPage(runId, page);
+    let previousUrl: string | null = page.url();
+    let previousScreenshotHash: string | null = null;
 
     for (let index = startIndex; index < MAX_STEPS; index += 1) {
       if (await shouldStop(runId)) {
@@ -755,6 +917,11 @@ export const runSequence = async (
       }
 
       const currentRun = await getRun(runId);
+
+      if (await pauseForSafetyConfirmationIfNeeded(runId, page, currentRun, log)) {
+        break;
+      }
+
       const plannerScreenshot = await page.screenshot({
         fullPage: false,
       });
@@ -800,6 +967,22 @@ export const runSequence = async (
       }
 
       await captureActionStep(runId, page, index, action, summary);
+      const judgeResult = await evaluateAndApplyJudge(
+        runId,
+        page,
+        currentRun,
+        index,
+        log,
+        previousUrl,
+        previousScreenshotHash,
+      );
+      previousUrl = judgeResult.nextPreviousUrl;
+      previousScreenshotHash = judgeResult.nextPreviousScreenshotHash;
+
+      if (judgeResult.stopRun) {
+        break;
+      }
+
       log.info(
         { runId, step: index, actionType: action.type },
         'Captured run step',
@@ -834,6 +1017,8 @@ export const runComputerUseSequence = async (
     });
     const page = await context.newPage();
     const startIndex = await initializeDefaultStartPage(runId, page);
+    let previousUrl: string | null = page.url();
+    let previousScreenshotHash: string | null = null;
 
     for (let index = startIndex; index < MAX_STEPS; index += 1) {
       if (await shouldStop(runId)) {
@@ -846,6 +1031,11 @@ export const runComputerUseSequence = async (
       }
 
       const currentRun = await getRun(runId);
+
+      if (await pauseForSafetyConfirmationIfNeeded(runId, page, currentRun, log)) {
+        break;
+      }
+
       const plannerScreenshot = await page.screenshot({
         fullPage: false,
       });
@@ -900,6 +1090,22 @@ export const runComputerUseSequence = async (
       }
 
       await captureActionStep(runId, page, index, loggedAction, summary);
+      const judgeResult = await evaluateAndApplyJudge(
+        runId,
+        page,
+        currentRun,
+        index,
+        log,
+        previousUrl,
+        previousScreenshotHash,
+      );
+      previousUrl = judgeResult.nextPreviousUrl;
+      previousScreenshotHash = judgeResult.nextPreviousScreenshotHash;
+
+      if (judgeResult.stopRun) {
+        break;
+      }
+
       log.info(
         { runId, step: index, toolCall: toolCall.name ?? 'unknown' },
         'Captured computer use step',

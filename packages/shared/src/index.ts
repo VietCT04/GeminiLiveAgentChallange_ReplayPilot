@@ -81,7 +81,10 @@ export const RunStatusSchema = z.enum([
 
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 
-export const HumanHandoffReasonSchema = z.enum(['CAPTCHA_DETECTED']);
+export const HumanHandoffReasonSchema = z.enum([
+  'CAPTCHA_DETECTED',
+  'SAFETY_CONFIRMATION_PENDING',
+]);
 
 export type HumanHandoffReason = z.infer<typeof HumanHandoffReasonSchema>;
 
@@ -106,6 +109,9 @@ export type StepRecord = z.infer<typeof StepRecordSchema>;
 export const RunStateSchema = z.object({
   runId: z.string(),
   goal: z.string(),
+  planSteps: z.array(z.string()).default([]),
+  completedPlanSteps: z.number().int().nonnegative().default(0),
+  approvedSafetyStep: z.string().optional(),
   status: RunStatusSchema,
   step: z.number().int().nonnegative(),
   startedAt: z.number(),
@@ -121,9 +127,24 @@ export type RunState = z.infer<typeof RunStateSchema>;
 
 export const StartRunRequestSchema = z.object({
   goal: z.string().trim().min(1).max(500),
+  planSteps: z.array(z.string().trim().min(1).max(200)).max(12).optional(),
 });
 
 export type StartRunRequest = z.infer<typeof StartRunRequestSchema>;
+
+export const GeneratePlanRequestSchema = z.object({
+  goal: z.string().trim().min(1).max(500),
+});
+
+export type GeneratePlanRequest = z.infer<typeof GeneratePlanRequestSchema>;
+
+export const GeneratePlanResponseSchema = z.object({
+  goal: z.string(),
+  summary: z.string().trim().min(1).max(200),
+  steps: z.array(z.string().trim().min(1).max(200)).min(1).max(12),
+});
+
+export type GeneratePlanResponse = z.infer<typeof GeneratePlanResponseSchema>;
 
 export const StartRunResponseSchema = z.object({
   runId: z.string(),

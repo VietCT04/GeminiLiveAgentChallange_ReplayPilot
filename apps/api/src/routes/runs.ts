@@ -1,4 +1,6 @@
 import {
+  GeneratePlanRequestSchema,
+  GeneratePlanResponseSchema,
   StartRunRequestSchema,
   type StartRunRequest,
   StartRunResponseSchema,
@@ -10,6 +12,7 @@ import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { runComputerUseSequence, runSequence } from '../lib/runner';
 import { createRun, getRun, resolveArtifactPath, updateRun } from '../lib/run-store';
+import { generateHighLevelPlan } from '../planner/highLevelPlan';
 
 const demoGoal =
   'Open YouTube, search Adele Hello official music video, open top result, attempt Like. Success if Like toggles on or sign in prompt appears.';
@@ -34,7 +37,7 @@ const sendNotFound = async (reply: FastifyReply): Promise<void> => {
 };
 
 const startRun = async (
-  goal: string,
+  requestBody: StartRunRequest,
   log: {
     info: (context: object, message: string) => void;
     error: (context: object, message: string) => void;
@@ -44,7 +47,7 @@ const startRun = async (
     log: { info: (context: object, message: string) => void },
   ) => Promise<void>,
 ): Promise<StartRunResponse> => {
-  const runState = await createRun(goal);
+  const runState = await createRun(requestBody.goal, requestBody.planSteps ?? []);
   log.info({ runId: runState.runId }, 'Created run');
 
   void runInBackground(runState.runId, log).catch((error: unknown) => {
@@ -57,6 +60,26 @@ const startRun = async (
 };
 
 export const runsRoutes: FastifyPluginAsync = async (app) => {
+  app.post('/plan', async (request, reply) => {
+    const parsedBody = GeneratePlanRequestSchema.safeParse(request.body);
+
+    if (!parsedBody.success) {
+      return reply.code(400).send({
+        message: 'Invalid plan request',
+        issues: parsedBody.error.issues,
+      });
+    }
+
+    const generatedPlan = await generateHighLevelPlan(parsedBody.data.goal);
+    const response = GeneratePlanResponseSchema.parse({
+      goal: parsedBody.data.goal,
+      summary: generatedPlan.summary,
+      steps: generatedPlan.steps,
+    });
+
+    return reply.send(response);
+  });
+
   app.post<{ Body: StartRunRequest }>('/', async (request, reply) => {
     const parsedBody = StartRunRequestSchema.safeParse(request.body);
 
@@ -67,7 +90,7 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const response = await startRun(parsedBody.data.goal, app.log, runSequence);
+    const response = await startRun(parsedBody.data, app.log, runSequence);
     return reply.send(response);
   });
 
@@ -82,7 +105,7 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const response = await startRun(
-      parsedBody.data.goal,
+      parsedBody.data,
       app.log,
       runComputerUseSequence,
     );
@@ -90,7 +113,7 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/demo', async (_request, reply) => {
-    const response = await startRun(demoGoal, app.log, runSequence);
+    const response = await startRun({ goal: demoGoal }, app.log, runSequence);
     return reply.send(response);
   });
 
@@ -162,10 +185,23 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
     '/:runId/resume',
     async (request, reply) => {
       try {
+        const existingRun = await getRun(request.params.runId);
+        const currentPlanStep =
+          existingRun.planSteps.length > 0
+            ? existingRun.planSteps[
+                Math.min(existingRun.completedPlanSteps, existingRun.planSteps.length - 1)
+              ]
+            : undefined;
         const runState = await updateRun(request.params.runId, {
           status: 'running',
           updatedAt: Date.now(),
           handoff: undefined,
+          ...(existingRun.handoff?.reason === 'SAFETY_CONFIRMATION_PENDING' &&
+          currentPlanStep
+            ? {
+                approvedSafetyStep: currentPlanStep,
+              }
+            : {}),
         });
 
         app.log.info({ runId: runState.runId }, 'Resumed run');

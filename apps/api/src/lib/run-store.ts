@@ -29,11 +29,16 @@ const writeRun = async (runState: RunState): Promise<RunState> => {
   return validatedRun;
 };
 
-export const createRun = async (goal: string): Promise<RunState> => {
+export const createRun = async (
+  goal: string,
+  planSteps: string[] = [],
+): Promise<RunState> => {
   const now = Date.now();
   const initialRun: RunState = {
     runId: randomUUID(),
     goal,
+    planSteps,
+    completedPlanSteps: 0,
     status: 'queued',
     step: 0,
     startedAt: now,

@@ -1,4 +1,6 @@
 import {
+  GeneratePlanRequestSchema,
+  GeneratePlanResponseSchema,
   RunStateSchema,
   StartRunRequestSchema,
   StartRunResponseSchema,
@@ -16,6 +18,12 @@ type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
   text: string;
   timestamp: number;
+};
+
+type DraftPlan = {
+  summary: string;
+  steps: string[];
+  runMode: 'standard' | 'computer-use';
 };
 
 const formatTimestamp = (value: number | undefined): string => {
@@ -55,6 +63,9 @@ function App() {
   const [goal, setGoal] = useState(defaultGoal);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [isStartingRun, setIsStartingRun] = useState(false);
+  const [draftPlan, setDraftPlan] = useState<DraftPlan | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'intro',
@@ -84,6 +95,10 @@ function App() {
         timestamp,
       },
     ]);
+  };
+
+  const normalizeDraftPlanSteps = (steps: string[]): string[] => {
+    return steps.map((step) => step.trim()).filter((step) => step.length > 0);
   };
 
   const stopPolling = (): void => {
@@ -134,23 +149,82 @@ function App() {
     }, 1000);
   };
 
-  const startRun = async (
-    endpointPath: string,
+  const generatePlan = async (
+    runMode: DraftPlan['runMode'],
     failureMessage: string,
   ): Promise<void> => {
+    setRequestError(null);
+    setIsGeneratingPlan(true);
+
+    try {
+      const requestBody = GeneratePlanRequestSchema.parse({
+        goal,
+      });
+
+      appendMessage('user', goal);
+
+      const response = await fetch(`${API_BASE_URL}/runs/plan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        throw new Error(failureMessage);
+      }
+
+      const payload = GeneratePlanResponseSchema.parse(
+        (await response.json()) as unknown,
+      );
+
+      setDraftPlan({
+        summary: payload.summary,
+        steps: payload.steps,
+        runMode,
+      });
+      appendMessage(
+        'system',
+        'Draft plan generated. Review the steps, edit them if needed, then confirm the run.',
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : failureMessage;
+      setRequestError(message);
+      appendMessage('system', message);
+    } finally {
+      setIsGeneratingPlan(false);
+    }
+  };
+
+  const startRun = async (): Promise<void> => {
+    if (!draftPlan) {
+      return;
+    }
+
+    const failureMessage =
+      draftPlan.runMode === 'computer-use'
+        ? 'Failed to start computer use run'
+        : 'Failed to start run';
+
     stopPolling();
     setRequestError(null);
     setRunState(null);
     setRunId(null);
+    setIsStartingRun(true);
     reportedHistoryCountRef.current = 0;
     announcedTerminalStatusRef.current = null;
     announcedErrorRef.current = null;
     announcedHandoffRef.current = null;
 
     try {
+      const approvedPlanSteps = normalizeDraftPlanSteps(draftPlan.steps);
       const requestBody = StartRunRequestSchema.parse({
         goal,
+        planSteps: approvedPlanSteps,
       });
+      const endpointPath =
+        draftPlan.runMode === 'computer-use' ? '/runs/computer-use' : '/runs';
 
       const response = await fetch(`${API_BASE_URL}${endpointPath}`, {
         method: 'POST',
@@ -169,27 +243,29 @@ function App() {
       );
 
       setRunId(payload.runId);
-      appendMessage('user', goal);
       appendMessage(
         'system',
-        `Sent to backend. Run ${payload.runId} is starting now.`,
+        `Plan confirmed. Run ${payload.runId} is starting now.`,
       );
       await loadRun(payload.runId);
       startPolling(payload.runId);
+      setDraftPlan(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : failureMessage;
       setIsPolling(false);
       setRequestError(message);
       appendMessage('system', message);
+    } finally {
+      setIsStartingRun(false);
     }
   };
 
   const handleRunClick = async (): Promise<void> => {
-    await startRun('/runs', 'Failed to start run');
+    await generatePlan('standard', 'Failed to generate plan');
   };
 
   const handleComputerUseClick = async (): Promise<void> => {
-    await startRun('/runs/computer-use', 'Failed to start computer use run');
+    await generatePlan('computer-use', 'Failed to generate plan');
   };
 
   const handleStopClick = async (): Promise<void> => {
@@ -316,11 +392,17 @@ function App() {
 
   const isRunning = runState?.status === 'running';
   const isWaitingForHuman = runState?.status === 'waiting_for_human';
-  const isActive = isRunning || isPolling || isWaitingForHuman;
+  const isActive =
+    isRunning || isPolling || isWaitingForHuman || isGeneratingPlan;
   const latestEntry =
     runState && runState.history.length > 0
       ? runState.history[runState.history.length - 1]
       : null;
+  const effectivePlanSteps = draftPlan?.steps ?? runState?.planSteps ?? [];
+  const completedPlanSteps = Math.min(
+    runState?.completedPlanSteps ?? 0,
+    runState?.planSteps.length ?? 0,
+  );
   const screenshotUrl = runState?.lastScreenshotUrl
     ? `${API_BASE_URL}${runState.lastScreenshotUrl}?t=${runState.updatedAt}`
     : null;
@@ -343,6 +425,8 @@ function App() {
                 <span>
                   {isRunning
                     ? 'Processing'
+                    : isGeneratingPlan
+                      ? 'Drafting Plan'
                     : isWaitingForHuman
                       ? 'Waiting For Human'
                       : 'Refreshing'}
@@ -386,27 +470,120 @@ function App() {
               }}
               placeholder="Tell ReplayPilot what to do next..."
             />
+            {draftPlan ? (
+              <section className="plan-editor">
+                <div className="plan-header-row">
+                  <div>
+                    <p className="eyebrow">Draft Plan</p>
+                    <p className="plan-summary">{draftPlan.summary}</p>
+                  </div>
+                  <span className="step-counter">
+                    {draftPlan.steps.length} steps
+                  </span>
+                </div>
+                <div className="plan-step-list">
+                  {draftPlan.steps.map((step, index) => (
+                    <div className="plan-step-row" key={`${index}-${step}`}>
+                      <span className="plan-step-index">{index + 1}</span>
+                      <textarea
+                        className="plan-step-input"
+                        rows={2}
+                        value={step}
+                        onChange={(event) => {
+                          setDraftPlan((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  steps: current.steps.map((item, itemIndex) =>
+                                    itemIndex === index ? event.target.value : item,
+                                  ),
+                                }
+                              : current,
+                          );
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDraftPlan((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  steps:
+                                    current.steps.length > 1
+                                      ? current.steps.filter(
+                                          (_item, itemIndex) => itemIndex !== index,
+                                        )
+                                      : current.steps,
+                                }
+                              : current,
+                          );
+                        }}
+                        disabled={draftPlan.steps.length <= 1}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraftPlan((current) =>
+                      current
+                        ? {
+                            ...current,
+                            steps: [...current.steps, ''],
+                          }
+                        : current,
+                    );
+                  }}
+                >
+                  Add Step
+                </button>
+              </section>
+            ) : null}
             <div className="button-row">
               <button type="button" onClick={() => void handleRunClick()}>
-                Send
+                Generate Plan
               </button>
               <button
                 type="button"
                 onClick={() => void handleComputerUseClick()}
               >
-                Send Computer Use
+                Generate Computer Use Plan
+              </button>
+              <button
+                type="button"
+                onClick={() => void startRun()}
+                disabled={!draftPlan || isStartingRun || isGeneratingPlan}
+              >
+                {draftPlan?.runMode === 'computer-use'
+                  ? 'Confirm Computer Use'
+                  : 'Confirm Run'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDraftPlan(null);
+                }}
+                disabled={!draftPlan}
+              >
+                Clear Draft
               </button>
               <button
                 type="button"
                 onClick={() => void handleResumeClick()}
-                disabled={!isWaitingForHuman}
+                disabled={!isWaitingForHuman || isGeneratingPlan || isStartingRun}
               >
                 Resume
               </button>
               <button
                 type="button"
                 onClick={() => void handleStopClick()}
-                disabled={!isRunning && !isWaitingForHuman}
+                disabled={
+                  (!isRunning && !isWaitingForHuman) || isGeneratingPlan || isStartingRun
+                }
               >
                 Stop
               </button>
@@ -436,6 +613,16 @@ function App() {
               <div>
                 <dt>Step</dt>
                 <dd>{runState?.step ?? 0}</dd>
+              </div>
+              <div>
+                <dt>Plan</dt>
+                <dd>
+                  {runState?.planSteps?.length
+                    ? `${completedPlanSteps}/${runState.planSteps.length} tracked`
+                    : draftPlan
+                      ? `${normalizeDraftPlanSteps(draftPlan.steps).length} draft steps`
+                      : 'none'}
+                </dd>
               </div>
               <div>
                 <dt>Updated</dt>
@@ -468,6 +655,42 @@ function App() {
                 </dd>
               </div>
             </dl>
+          </section>
+
+          <section className="status-card">
+            <div className="card-title-row">
+              <h2>Plan Progress</h2>
+              <span className="step-counter">
+                {effectivePlanSteps.length
+                  ? `${Math.min(
+                      runState?.completedPlanSteps ?? 0,
+                      effectivePlanSteps.length,
+                    )}/${effectivePlanSteps.length}`
+                  : 'No plan yet'}
+              </span>
+            </div>
+            {effectivePlanSteps.length ? (
+              <ol className="plan-progress-list">
+                {effectivePlanSteps.map((step, index) => {
+                  const isComplete = index < completedPlanSteps;
+                  return (
+                    <li
+                      className={`plan-progress-item ${isComplete ? 'plan-progress-complete' : ''}`}
+                      key={`${index}-${step}`}
+                    >
+                      <span className="plan-progress-marker">
+                        {isComplete ? 'Done' : `Step ${index + 1}`}
+                      </span>
+                      <span>{step}</span>
+                    </li>
+                  );
+                })}
+              </ol>
+            ) : (
+              <p className="empty-state">
+                Generate a plan first, then confirm it to start execution.
+              </p>
+            )}
           </section>
 
           <section className="status-card">

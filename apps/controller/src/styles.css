@@ -150,6 +150,96 @@ body {
   resize: vertical;
 }
 
+.plan-editor {
+  margin-top: 18px;
+  padding: 18px;
+  border-radius: 20px;
+  background: #f4f8fb;
+  border: 1px solid #d5e0ea;
+}
+
+.plan-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.plan-summary {
+  margin: 6px 0 0;
+  color: #35506c;
+  line-height: 1.5;
+}
+
+.plan-step-list,
+.plan-progress-list {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0 0;
+  padding: 0;
+}
+
+.plan-step-row,
+.plan-progress-item {
+  display: grid;
+  gap: 12px;
+  align-items: start;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #d8e2ec;
+}
+
+.plan-step-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.plan-step-index,
+.plan-progress-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #e7f0f8;
+  color: #35506c;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.plan-step-input {
+  width: 100%;
+  min-height: 72px;
+  border: 1px solid #d5e0ea;
+  border-radius: 14px;
+  background: #fbfdff;
+  padding: 12px;
+  font: inherit;
+  color: inherit;
+  resize: vertical;
+}
+
+.plan-progress-list {
+  list-style: none;
+}
+
+.plan-progress-item {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.plan-progress-complete {
+  background: #edf8ef;
+  border-color: #cfe5d5;
+}
+
+.plan-progress-complete .plan-progress-marker {
+  background: #d8efdf;
+  color: #1f6a36;
+}
+
 .status-panel {
   display: flex;
   flex-direction: column;
@@ -392,6 +482,11 @@ dd {
   .message-list {
     min-height: 360px;
     max-height: none;
+  }
+
+  .plan-step-row,
+  .plan-progress-item {
+    grid-template-columns: 1fr;
   }
 
   .detail-list > div {
