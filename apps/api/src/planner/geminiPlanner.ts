@@ -42,6 +42,8 @@ export type PlannerViewport = {
 
 export type PlannerContext = {
   verifierLowConfidenceStreak?: number;
+  planSteps?: string[];
+  completedPlanSteps?: number;
 };
 
 type PlannerRequestLog = {
@@ -620,6 +622,29 @@ const buildPrompt = (
   ].join(',');
 };
 
+const buildPlanContextText = (context: PlannerContext): string | null => {
+  const planSteps = context.planSteps ?? [];
+
+  if (planSteps.length === 0) {
+    return null;
+  }
+
+  const completedPlanSteps = Math.max(0, context.completedPlanSteps ?? 0);
+  const currentStepIndex = Math.min(completedPlanSteps, planSteps.length - 1);
+  const currentStep = planSteps[currentStepIndex];
+  const remainingSteps = planSteps.slice(currentStepIndex + 1);
+
+  return [
+    'Approved execution plan:',
+    `Current step index: ${currentStepIndex + 1} of ${planSteps.length}`,
+    `Current step: ${currentStep}`,
+    `Completed steps: ${JSON.stringify(planSteps.slice(0, currentStepIndex))}`,
+    `Upcoming steps: ${JSON.stringify(remainingSteps)}`,
+    'Prioritize completing the current step before jumping ahead.',
+    'Do not prematurely submit a form if a later approved step explicitly says to click a submit/login button.',
+  ].join('\n');
+};
+
 export const planNextAction = async (
   goal: string,
   screenshotBytes: Buffer,
@@ -715,6 +740,7 @@ const runPlannerTurnDetailed = async (
 ): Promise<{ responseLog: PlannerResponseLog; debug: PlannerDebugPayload }> => {
   const recentHistory = history.slice(-HISTORY_WINDOW);
   const prompt = buildPrompt(goal, recentHistory, viewport);
+  const planContextText = buildPlanContextText(context);
   const base64Image = screenshotBytes.toString('base64');
   const initialModel = selectInitialModel(recentHistory, context);
   const requestLog: PlannerRequestLog = {
@@ -735,6 +761,7 @@ const runPlannerTurnDetailed = async (
     },
     contents: [
       { text: prompt },
+      ...(planContextText ? [{ text: planContextText }] : []),
       {
         inlineData: {
           mimeType: 'image/png',

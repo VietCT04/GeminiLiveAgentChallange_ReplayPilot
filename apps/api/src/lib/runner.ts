@@ -187,6 +187,41 @@ const getActionPoint = (
   return null;
 };
 
+const submitIntentTokens = [
+  'submit',
+  'login',
+  'log in',
+  'sign in',
+  'continue',
+  'confirm',
+  'search',
+  'send',
+  'go',
+  'next',
+];
+
+const shouldSuppressImplicitSubmit = (runState: RunState): boolean => {
+  if (runState.planSteps.length === 0) {
+    return false;
+  }
+
+  const upcomingSteps = runState.planSteps.slice(runState.completedPlanSteps + 1);
+
+  return upcomingSteps.some((step) => {
+    const normalized = step.toLowerCase();
+    const hasClickIntent =
+      normalized.includes('click') ||
+      normalized.includes('tap') ||
+      normalized.includes('press') ||
+      normalized.includes('select');
+    const hasSubmitTarget = submitIntentTokens.some((token) =>
+      normalized.includes(token),
+    );
+
+    return hasClickIntent && hasSubmitTarget;
+  });
+};
+
 const showActionMarker = async (
   page: Page,
   action: Action,
@@ -408,6 +443,7 @@ const executeComputerUseToolCall = async (
   page: Page,
   goal: string,
   toolCall: ComputerUseToolCall,
+  runState?: RunState,
 ): Promise<void> => {
   const normalizedToolCall = normalizeToolCall(toolCall);
   const name = (normalizedToolCall.name ?? '').toLowerCase();
@@ -480,7 +516,10 @@ const executeComputerUseToolCall = async (
         args.submit === true ||
         args.enter === true;
 
-      if (shouldPressEnter) {
+      if (
+        shouldPressEnter &&
+        !(runState && shouldSuppressImplicitSubmit(runState))
+      ) {
         await page.keyboard.press('Enter');
       }
 
@@ -951,6 +990,8 @@ export const runSequence = async (
         VIEWPORT,
         {
           verifierLowConfidenceStreak: 0,
+          planSteps: currentRun.planSteps,
+          completedPlanSteps: currentRun.completedPlanSteps,
         },
       );
 
@@ -1069,6 +1110,8 @@ export const runComputerUseSequence = async (
         VIEWPORT,
         {
           verifierLowConfidenceStreak: 0,
+          planSteps: currentRun.planSteps,
+          completedPlanSteps: currentRun.completedPlanSteps,
         },
       );
 
@@ -1099,7 +1142,7 @@ export const runComputerUseSequence = async (
         throw new Error('Computer Use planner did not return a tool call');
       }
 
-      await executeComputerUseToolCall(page, currentRun.goal, toolCall);
+      await executeComputerUseToolCall(page, currentRun.goal, toolCall, currentRun);
       await wait(page, STEP_SETTLE_MS);
 
       if (await shouldStop(runId)) {
