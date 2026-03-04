@@ -837,14 +837,35 @@ const evaluateAndApplyJudge = async (
     currentRun.planSteps.length > 0 &&
     currentRun.completedPlanSteps < currentRun.planSteps.length
   ) {
+    const nextCompletedPlanSteps = currentRun.completedPlanSteps + 1;
+    const hasFinishedPlan = nextCompletedPlanSteps >= currentRun.planSteps.length;
+
     await updateRun(runId, {
-      completedPlanSteps: currentRun.completedPlanSteps + 1,
+      completedPlanSteps: nextCompletedPlanSteps,
       approvedSafetyStep:
         currentRun.approvedSafetyStep === getCurrentPlanCriteria(currentRun)
           ? undefined
           : currentRun.approvedSafetyStep,
+      ...(hasFinishedPlan
+        ? {
+            status: 'success' as const,
+          }
+        : {}),
       updatedAt: Date.now(),
     });
+
+    if (hasFinishedPlan) {
+      log.info(
+        { runId, step: index, completedPlanSteps: nextCompletedPlanSteps },
+        'Run completed after all plan steps passed judge',
+      );
+
+      return {
+        stopRun: true,
+        nextPreviousUrl: currentUrl,
+        nextPreviousScreenshotHash: evaluation.screenshotHash,
+      };
+    }
   }
 
   log.info(
