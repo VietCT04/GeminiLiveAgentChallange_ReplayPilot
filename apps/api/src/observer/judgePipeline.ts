@@ -21,8 +21,8 @@ const JudgeEvidenceSchema = z.object({
 
 const VisionJudgeSchema = z.object({
   verdict: JudgeVerdictSchema,
-  reasons: z.array(z.string().min(1)).min(1).max(5),
-  evidence: z.array(JudgeEvidenceSchema).max(5),
+  reasons: z.array(z.string().min(1)).min(1),
+  evidence: z.array(JudgeEvidenceSchema),
 });
 
 const VisionJudgeResponseSchema = {
