@@ -12,16 +12,6 @@ The repo is intentionally opinionated around one core idea: browser agents shoul
 - Shared contracts: frontend and backend use a shared Zod schema package, which keeps run state, plan data, and API payloads consistent.
 - Practical browser automation: Playwright drives a real Chromium instance, while Gemini handles planning and visual reasoning.
 
-## Demo Flow
-
-1. The user enters a goal in the chat UI.
-2. The backend calls Gemini 2.5 Flash to generate a high-level plan.
-3. The UI shows the draft plan, and the user can edit, remove, or add steps.
-4. After confirmation, the backend starts a run and persists the approved plan.
-5. Chromium launches automatically and opens Google as the starting page.
-6. The step planner chooses one next action at a time.
-7. After each action, the verification pipeline checks whether the current plan step actually passed, should retry, should fail, or requires a human handoff.
-8. The run stops automatically when all approved plan steps are complete.
 
 ## Architecture
 
