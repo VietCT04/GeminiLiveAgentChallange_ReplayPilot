@@ -1,4 +1,5 @@
 import { chromium, type Page } from 'playwright';
+import { config as loadEnv } from 'dotenv';
 import {
   ActionSchema,
   type Action,
@@ -7,6 +8,11 @@ import {
 } from '@replaypilot/shared';
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+import * as path from 'node:path';
+
+loadEnv({
+  path: path.resolve(__dirname, '..', '..', '..', '..', '.env'),
+});
 
 type PlannerMode = 'standard' | 'computer-use';
 

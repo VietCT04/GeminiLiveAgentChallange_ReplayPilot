@@ -7,7 +7,7 @@ import {
   type RunState,
 } from '@replaypilot/shared';
 import { useEffect, useRef, useState } from 'react';
-import { API_BASE_URL } from './config';
+import { API_BASE_URL, USE_ORCHESTRATOR_START } from './config';
 
 const terminalStatuses = new Set(['success', 'fail', 'stopped']);
 const defaultGoal =
@@ -224,7 +224,11 @@ function App() {
         planSteps: approvedPlanSteps,
       });
       const endpointPath =
-        draftPlan.runMode === 'computer-use' ? '/runs/computer-use' : '/runs';
+        USE_ORCHESTRATOR_START
+          ? '/runs/orchestrator/start'
+          : draftPlan.runMode === 'computer-use'
+            ? '/runs/computer-use'
+            : '/runs';
 
       const response = await fetch(`${API_BASE_URL}${endpointPath}`, {
         method: 'POST',
@@ -245,7 +249,9 @@ function App() {
       setRunId(payload.runId);
       appendMessage(
         'system',
-        `Plan confirmed. Run ${payload.runId} is starting now.`,
+        USE_ORCHESTRATOR_START
+          ? `Plan confirmed. Run ${payload.runId} is created in orchestrator mode. Start local executor.`
+          : `Plan confirmed. Run ${payload.runId} is starting now.`,
       );
       await loadRun(payload.runId);
       startPolling(payload.runId);
