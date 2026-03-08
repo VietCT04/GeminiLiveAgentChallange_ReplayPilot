@@ -6,6 +6,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "npm run build -w @replaypilot/shared && tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "executor": "tsx src/local/localExecutor.ts",
     "typecheck": "npm run build -w @replaypilot/shared && tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"src/**/*.ts\""
   },
