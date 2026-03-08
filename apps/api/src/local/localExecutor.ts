@@ -347,18 +347,20 @@ const run = async (): Promise<void> => {
     process.env.REPLAYPILOT_ORCHESTRATOR_URL;
   const planner = (readArg('planner') as PlannerMode | undefined) ?? 'computer-use';
   const headless = (readArg('headless') ?? process.env.EXECUTOR_HEADLESS ?? 'false') === 'true';
-  const goal = readArg('goal') ?? process.env.REPLAYPILOT_GOAL;
-
-  if (!goal) {
-    throw new Error(
-      'Missing goal. Provide --goal="..." or set REPLAYPILOT_GOAL environment variable.',
-    );
-  }
+  const goalArg = readArg('goal');
 
   if (!orchestratorBaseUrl) {
     throw new Error(
       'Missing orchestrator URL. Provide --orchestrator-url="https://..." or set REPLAYPILOT_ORCHESTRATOR_URL.',
     );
+  }
+
+  const rl = createInterface({ input, output });
+  const goal = goalArg ?? (await rl.question('Enter goal: ')).trim();
+  rl.close();
+
+  if (!goal) {
+    throw new Error('Missing goal. Please enter a non-empty goal.');
   }
 
   const plan = await postJson<{ steps: string[]; summary: string }>(
