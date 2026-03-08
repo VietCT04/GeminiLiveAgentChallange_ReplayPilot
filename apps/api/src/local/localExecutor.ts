@@ -14,15 +14,6 @@ loadEnv({
   path: path.resolve(__dirname, '..', '..', '..', '..', '.env'),
 });
 
-type PlannerMode = 'standard' | 'computer-use';
-
-type PlanNextStandardResponse = {
-  planner: 'standard';
-  action: Action;
-  summary: string;
-  runState: RunState;
-};
-
 type ToolCall = {
   name?: string;
   args?: Record<string, unknown>;
@@ -136,42 +127,6 @@ const extractPoint = (
 const clearFocusedField = async (page: Page): Promise<void> => {
   await page.keyboard.press('Control+A');
   await page.keyboard.press('Backspace');
-};
-
-const executeAction = async (page: Page, action: Action): Promise<void> => {
-  switch (action.type) {
-    case 'navigate':
-      await page.goto(action.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      return;
-    case 'click':
-      await page.mouse.click(action.x, action.y, {
-        button: action.button ?? 'left',
-        clickCount: action.clicks ?? 1,
-      });
-      return;
-    case 'type':
-      if (typeof action.x === 'number' && typeof action.y === 'number') {
-        await page.mouse.click(action.x, action.y);
-      }
-      await clearFocusedField(page);
-      await page.keyboard.type(action.text, { delay: 40 });
-      if (action.submit) {
-        await page.keyboard.press('Enter');
-      }
-      return;
-    case 'scroll':
-      await page.mouse.wheel(0, action.deltaY);
-      return;
-    case 'wait':
-      await page.waitForTimeout(action.ms);
-      return;
-    case 'done':
-      return;
-    default: {
-      const exhaustiveCheck: never = action;
-      throw new Error(`Unsupported action: ${JSON.stringify(exhaustiveCheck)}`);
-    }
-  }
 };
 
 const normalizeToolName = (name: string): string => {
@@ -351,7 +306,6 @@ const run = async (): Promise<void> => {
   const orchestratorBaseUrl =
     readArg('orchestrator-url') ??
     process.env.REPLAYPILOT_ORCHESTRATOR_URL;
-  const planner = (readArg('planner') as PlannerMode | undefined) ?? 'computer-use';
   const headless = (readArg('headless') ?? process.env.EXECUTOR_HEADLESS ?? 'false') === 'true';
   const goalArg = readArg('goal');
 
@@ -422,26 +376,22 @@ const run = async (): Promise<void> => {
 
     for (;;) {
       const plannerScreenshotBase64 = await takeScreenshotBase64(page);
-      const planNextResponse = await postJson<
-        PlanNextStandardResponse | PlanNextComputerUseResponse
-      >(orchestratorBaseUrl, `/runs/${runId}/orchestrator/plan-next`, {
-        planner,
+      const planNextResponse = await postJson<PlanNextComputerUseResponse>(
+        orchestratorBaseUrl,
+        `/runs/${runId}/orchestrator/plan-next`,
+        {
         screenshotBase64: plannerScreenshotBase64,
         viewport: DEFAULT_VIEWPORT,
-      });
+        },
+      );
 
       let actionToReport: Action;
 
-      if (planNextResponse.planner === 'standard') {
-        actionToReport = ActionSchema.parse(planNextResponse.action);
-        await executeAction(page, actionToReport);
-      } else {
-        actionToReport = ActionSchema.parse(planNextResponse.actionPreview);
-        if (planNextResponse.toolCall) {
-          await executeToolCall(page, goal, planNextResponse.toolCall);
-        } else if (actionToReport.type !== 'done') {
-          throw new Error('No tool call returned for non-done computer-use step');
-        }
+      actionToReport = ActionSchema.parse(planNextResponse.actionPreview);
+      if (planNextResponse.toolCall) {
+        await executeToolCall(page, goal, planNextResponse.toolCall);
+      } else if (actionToReport.type !== 'done') {
+        throw new Error('No tool call returned for non-done computer-use step');
       }
 
       const reportedScreenshotBase64 = await takeScreenshotBase64(page);

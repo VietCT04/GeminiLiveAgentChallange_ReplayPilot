@@ -13,7 +13,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
 import { evaluateStep } from '../observer/judgePipeline';
-import { runComputerUseSequence, runSequence } from '../lib/runner';
+import { runComputerUseSequence } from '../lib/runner';
 import {
   appendHistory,
   createRun,
@@ -24,12 +24,8 @@ import {
 } from '../lib/run-store';
 import {
   planComputerUseStepDetailed,
-  planNextActionDetailed,
 } from '../planner/geminiPlanner';
 import { generateHighLevelPlan } from '../planner/highLevelPlan';
-
-const demoGoal =
-  'Open YouTube, search Adele Hello official music video, open top result, attempt Like. Success if Like toggles on or sign in prompt appears.';
 
 const allowedArtifactExtensions = new Set(['.png', '.jpg', '.jpeg', '.json']);
 const defaultViewport = {
@@ -44,7 +40,6 @@ const runtimeMode = RuntimeModeSchema.catch('local-runner').parse(
 const isOrchestratorMode = runtimeMode === 'orchestrator';
 
 const OrchestratorPlannerRequestSchema = z.object({
-  planner: z.enum(['standard', 'computer-use']).default('computer-use'),
   screenshotBase64: z.string().min(1),
   viewport: z
     .object({
@@ -226,28 +221,6 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
         const viewport = parsedBody.data.viewport ?? defaultViewport;
         const plannerIndex = runState.history.length;
 
-        if (parsedBody.data.planner === 'standard') {
-          const { action, summary, debug } = await planNextActionDetailed(
-            runState.goal,
-            screenshotBytes,
-            runState.history,
-            viewport,
-            {
-              verifierLowConfidenceStreak: 0,
-              planSteps: runState.planSteps,
-              completedPlanSteps: runState.completedPlanSteps,
-            },
-          );
-          await writePlannerDebugFiles(runState.runId, plannerIndex, debug);
-
-          return reply.send({
-            planner: 'standard',
-            action,
-            summary,
-            runState,
-          });
-        }
-
         const { toolCall, actionPreview, summary, debug } =
           await planComputerUseStepDetailed(
             runState.goal,
@@ -379,24 +352,6 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
-  app.post<{ Body: StartRunRequest }>('/', async (request, reply) => {
-    if (isOrchestratorMode) {
-      return sendModeConflict(reply);
-    }
-
-    const parsedBody = StartRunRequestSchema.safeParse(request.body);
-
-    if (!parsedBody.success) {
-      return reply.code(400).send({
-        message: 'Invalid run request',
-        issues: parsedBody.error.issues,
-      });
-    }
-
-    const response = await startRunInBackground(parsedBody.data, app.log, runSequence);
-    return reply.send(response);
-  });
-
   app.post<{ Body: StartRunRequest }>('/computer-use', async (request, reply) => {
     if (isOrchestratorMode) {
       return sendModeConflict(reply);
@@ -415,19 +370,6 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
       parsedBody.data,
       app.log,
       runComputerUseSequence,
-    );
-    return reply.send(response);
-  });
-
-  app.post('/demo', async (_request, reply) => {
-    if (isOrchestratorMode) {
-      return sendModeConflict(reply);
-    }
-
-    const response = await startRunInBackground(
-      { goal: demoGoal },
-      app.log,
-      runSequence,
     );
     return reply.send(response);
   });

@@ -23,7 +23,7 @@ type ChatMessage = {
 type DraftPlan = {
   summary: string;
   steps: string[];
-  runMode: 'standard' | 'computer-use';
+  runMode: 'computer-use';
 };
 
 const formatTimestamp = (value: number | undefined): string => {
@@ -149,10 +149,7 @@ function App() {
     }, 1000);
   };
 
-  const generatePlan = async (
-    runMode: DraftPlan['runMode'],
-    failureMessage: string,
-  ): Promise<void> => {
+  const generatePlan = async (failureMessage: string): Promise<void> => {
     setRequestError(null);
     setIsGeneratingPlan(true);
 
@@ -182,7 +179,7 @@ function App() {
       setDraftPlan({
         summary: payload.summary,
         steps: payload.steps,
-        runMode,
+        runMode: 'computer-use',
       });
       appendMessage(
         'system',
@@ -202,10 +199,7 @@ function App() {
       return;
     }
 
-    const failureMessage =
-      draftPlan.runMode === 'computer-use'
-        ? 'Failed to start computer use run'
-        : 'Failed to start run';
+    const failureMessage = 'Failed to start computer use run';
 
     stopPolling();
     setRequestError(null);
@@ -226,9 +220,7 @@ function App() {
       const endpointPath =
         USE_ORCHESTRATOR_START
           ? '/runs/orchestrator/start'
-          : draftPlan.runMode === 'computer-use'
-            ? '/runs/computer-use'
-            : '/runs';
+          : '/runs/computer-use';
 
       const response = await fetch(`${API_BASE_URL}${endpointPath}`, {
         method: 'POST',
@@ -266,12 +258,8 @@ function App() {
     }
   };
 
-  const handleRunClick = async (): Promise<void> => {
-    await generatePlan('standard', 'Failed to generate plan');
-  };
-
   const handleComputerUseClick = async (): Promise<void> => {
-    await generatePlan('computer-use', 'Failed to generate plan');
+    await generatePlan('Failed to generate plan');
   };
 
   const handleStopClick = async (): Promise<void> => {
@@ -550,9 +538,6 @@ function App() {
               </section>
             ) : null}
             <div className="button-row">
-              <button type="button" onClick={() => void handleRunClick()}>
-                Generate Plan
-              </button>
               <button
                 type="button"
                 onClick={() => void handleComputerUseClick()}
@@ -564,9 +549,7 @@ function App() {
                 onClick={() => void startRun()}
                 disabled={!draftPlan || isStartingRun || isGeneratingPlan}
               >
-                {draftPlan?.runMode === 'computer-use'
-                  ? 'Confirm Computer Use'
-                  : 'Confirm Run'}
+                Confirm Computer Use
               </button>
               <button
                 type="button"
