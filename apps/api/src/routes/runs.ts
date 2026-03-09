@@ -18,6 +18,7 @@ import {
   appendHistory,
   createRun,
   getRun,
+  listRuns,
   resolveArtifactPath,
   updateRun,
   writeArtifactJson,
@@ -201,6 +202,21 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
 
     const response = await startRunWithoutBackground(parsedBody.data, app.log);
     return reply.send(response);
+  });
+
+  app.get('/orchestrator/pending', async (_request, reply) => {
+    const runs = await listRuns();
+    const pending = runs
+      .filter((run) => run.status === 'running' && run.history.length === 0)
+      .sort((a, b) => a.startedAt - b.startedAt)
+      .map((run) => ({
+        runId: run.runId,
+        goal: run.goal,
+      }));
+
+    return reply.send({
+      pending,
+    });
   });
 
   app.post<{ Params: { runId: string } }>(

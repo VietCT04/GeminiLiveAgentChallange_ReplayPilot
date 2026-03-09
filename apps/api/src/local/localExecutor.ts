@@ -35,6 +35,13 @@ type ReportStepResponse = {
   runState: RunState;
 };
 
+type PendingRunsResponse = {
+  pending: Array<{
+    runId: string;
+    goal: string;
+  }>;
+};
+
 const DEFAULT_VIEWPORT = {
   width: 1280,
   height: 720,
@@ -66,6 +73,19 @@ const postJson = async <T>(
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`POST ${path} failed (${response.status}): ${text}`);
+  }
+
+  return (await response.json()) as T;
+};
+
+const getJson = async <T>(baseUrl: string, path: string): Promise<T> => {
+  const response = await fetch(toUrl(baseUrl, path), {
+    method: 'GET',
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`GET ${path} failed (${response.status}): ${text}`);
   }
 
   return (await response.json()) as T;
@@ -302,43 +322,13 @@ const pauseForHuman = async (
   await postJson<RunState>(orchestratorBaseUrl, `/runs/${runId}/resume`, {});
 };
 
-const run = async (): Promise<void> => {
-  const orchestratorBaseUrl =
-    readArg('orchestrator-url') ??
-    process.env.REPLAYPILOT_ORCHESTRATOR_URL;
-  const headless = (readArg('headless') ?? process.env.EXECUTOR_HEADLESS ?? 'false') === 'true';
-  const goalArg = readArg('goal');
-
-  if (!orchestratorBaseUrl) {
-    throw new Error(
-      'Missing orchestrator URL. Provide --orchestrator-url="https://..." or set REPLAYPILOT_ORCHESTRATOR_URL.',
-    );
-  }
-
-  const rl = createInterface({ input, output });
-  const goal = goalArg ?? (await rl.question('Enter goal: ')).trim();
-  rl.close();
-
-  if (!goal) {
-    throw new Error('Missing goal. Please enter a non-empty goal.');
-  }
-
-  const plan = await postJson<{ steps: string[]; summary: string }>(
-    orchestratorBaseUrl,
-    '/runs/plan',
-    { goal },
-  );
-  const started = await postJson<StartRunResponse>(
-    orchestratorBaseUrl,
-    '/runs/orchestrator/start',
-    {
-      goal,
-      planSteps: plan.steps,
-    },
-  );
-
-  const runId = started.runId;
-  console.log(`Started run ${runId}`);
+const executeRun = async (
+  orchestratorBaseUrl: string,
+  runId: string,
+  goal: string,
+  headless: boolean,
+): Promise<void> => {
+  console.log(`Executing run ${runId}`);
 
   const browser = await chromium.launch({ headless });
   const context = await browser.newContext({
@@ -355,24 +345,27 @@ const run = async (): Promise<void> => {
       timeout: 15000,
     });
 
-    const initialScreenshotBase64 = await takeScreenshotBase64(page);
-    const initialReport = await postJson<ReportStepResponse>(
-      orchestratorBaseUrl,
-      `/runs/${runId}/orchestrator/report-step`,
-      {
-        action: {
-          type: 'navigate',
-          url: DEFAULT_START_URL,
+    const currentRunState = await getJson<RunState>(orchestratorBaseUrl, `/runs/${runId}`);
+    if (currentRunState.history.length === 0) {
+      const initialScreenshotBase64 = await takeScreenshotBase64(page);
+      const initialReport = await postJson<ReportStepResponse>(
+        orchestratorBaseUrl,
+        `/runs/${runId}/orchestrator/report-step`,
+        {
+          action: {
+            type: 'navigate',
+            url: DEFAULT_START_URL,
+          },
+          summary: 'Opened Google automatically as the start page',
+          screenshotBase64: initialScreenshotBase64,
+          currentUrl: page.url(),
+          previousUrl,
+          previousScreenshotHash,
         },
-        summary: 'Opened Google automatically as the start page',
-        screenshotBase64: initialScreenshotBase64,
-        currentUrl: page.url(),
-        previousUrl,
-        previousScreenshotHash,
-      },
-    );
-    previousUrl = page.url();
-    previousScreenshotHash = initialReport.screenshotHash;
+      );
+      previousUrl = page.url();
+      previousScreenshotHash = initialReport.screenshotHash;
+    }
 
     for (;;) {
       const plannerScreenshotBase64 = await takeScreenshotBase64(page);
@@ -380,14 +373,12 @@ const run = async (): Promise<void> => {
         orchestratorBaseUrl,
         `/runs/${runId}/orchestrator/plan-next`,
         {
-        screenshotBase64: plannerScreenshotBase64,
-        viewport: DEFAULT_VIEWPORT,
+          screenshotBase64: plannerScreenshotBase64,
+          viewport: DEFAULT_VIEWPORT,
         },
       );
 
-      let actionToReport: Action;
-
-      actionToReport = ActionSchema.parse(planNextResponse.actionPreview);
+      const actionToReport = ActionSchema.parse(planNextResponse.actionPreview);
       if (planNextResponse.toolCall) {
         await executeToolCall(page, goal, planNextResponse.toolCall);
       } else if (actionToReport.type !== 'done') {
@@ -434,6 +425,81 @@ const run = async (): Promise<void> => {
   } finally {
     await browser.close();
   }
+};
+
+const run = async (): Promise<void> => {
+  const orchestratorBaseUrl =
+    readArg('orchestrator-url') ??
+    process.env.REPLAYPILOT_ORCHESTRATOR_URL;
+  const headless = (readArg('headless') ?? process.env.EXECUTOR_HEADLESS ?? 'false') === 'true';
+  const watchMode = (readArg('watch') ?? 'false').toLowerCase() === 'true';
+  const runIdArg = readArg('run-id');
+  const goalArg = readArg('goal');
+
+  if (!orchestratorBaseUrl) {
+    throw new Error(
+      'Missing orchestrator URL. Provide --orchestrator-url="https://..." or set REPLAYPILOT_ORCHESTRATOR_URL.',
+    );
+  }
+
+  if (watchMode) {
+    console.log('Executor watch mode started. Waiting for new orchestrator runs...');
+    const running = new Set<string>();
+
+    for (;;) {
+      const pendingResponse = await getJson<PendingRunsResponse>(
+        orchestratorBaseUrl,
+        '/runs/orchestrator/pending',
+      );
+
+      for (const runInfo of pendingResponse.pending) {
+        if (running.has(runInfo.runId)) {
+          continue;
+        }
+
+        running.add(runInfo.runId);
+        try {
+          await executeRun(orchestratorBaseUrl, runInfo.runId, runInfo.goal, headless);
+        } finally {
+          running.delete(runInfo.runId);
+        }
+      }
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 1500);
+      });
+    }
+  }
+
+  if (runIdArg) {
+    const existingRun = await getJson<RunState>(orchestratorBaseUrl, `/runs/${runIdArg}`);
+    await executeRun(orchestratorBaseUrl, existingRun.runId, existingRun.goal, headless);
+    return;
+  }
+
+  const rl = createInterface({ input, output });
+  const goal = goalArg ?? (await rl.question('Enter goal: ')).trim();
+  rl.close();
+
+  if (!goal) {
+    throw new Error('Missing goal. Please enter a non-empty goal.');
+  }
+
+  const plan = await postJson<{ steps: string[]; summary: string }>(
+    orchestratorBaseUrl,
+    '/runs/plan',
+    { goal },
+  );
+  const started = await postJson<StartRunResponse>(
+    orchestratorBaseUrl,
+    '/runs/orchestrator/start',
+    {
+      goal,
+      planSteps: plan.steps,
+    },
+  );
+
+  await executeRun(orchestratorBaseUrl, started.runId, goal, headless);
 };
 
 void run().catch((error: unknown) => {
