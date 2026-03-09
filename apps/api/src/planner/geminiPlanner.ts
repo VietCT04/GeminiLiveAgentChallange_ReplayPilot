@@ -30,6 +30,7 @@ type PlannerSdkResponse = {
     content?: {
       parts?: Array<{
         functionCall?: ComputerUseToolCall;
+        text?: string;
       }>;
     };
   }>;
@@ -701,9 +702,51 @@ const generatePlannerOutput = async (
 
   console.info('[planner] full request', JSON.stringify(request, null, 2));
 
-  const response = (await ai.models.generateContent(request)) as PlannerSdkResponse;
+  const useRawHttp = (process.env.GEMINI_PLANNER_RAW_HTTP ?? 'true').toLowerCase() === 'true';
+  const response = useRawHttp
+    ? ((await (async (): Promise<PlannerSdkResponse> => {
+        const apiKey = process.env.GOOGLE_API_KEY;
+        if (!apiKey) {
+          throw new Error('GOOGLE_API_KEY is required for Gemini planning');
+        }
 
-  const rawText = response.text?.trim() ?? '';
+        const apiVersion = process.env.GEMINI_API_VERSION ?? 'v1alpha';
+        const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${encodeURIComponent(
+          model,
+        )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const body = {
+          contents: request.contents,
+          ...(request.config ? { config: request.config } : {}),
+        };
+
+        console.info('[planner] raw http body', JSON.stringify(body, null, 2));
+        const rawResponse = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+
+        if (!rawResponse.ok) {
+          const errorText = await rawResponse.text();
+          throw new Error(
+            `Raw Gemini HTTP call failed (${rawResponse.status}): ${errorText}`,
+          );
+        }
+
+        const parsed = (await rawResponse.json()) as PlannerSdkResponse;
+        return parsed;
+      })()) as PlannerSdkResponse)
+    : ((await ai.models.generateContent(request)) as PlannerSdkResponse);
+
+  const rawTextFromCandidates =
+    response.candidates
+      ?.flatMap((candidate) => candidate.content?.parts ?? [])
+      .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+      .join('')
+      .trim() ?? '';
+  const rawText = (response.text?.trim() ?? rawTextFromCandidates).trim();
   const functionCalls = extractFunctionCalls(response);
   const responseLog: PlannerResponseLog = {
     rawText,
