@@ -403,12 +403,52 @@ function App() {
 
   return (
     <main className="app-shell">
+      <header className="app-topbar">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            ▶
+          </span>
+          <span className="brand-text">ReplayPilot Chat</span>
+        </div>
+        <button type="button" className="help-button">
+          ?
+        </button>
+      </header>
       <section className="controller-layout">
+        <aside className="left-sidebar">
+          <section className="sidebar-group">
+            <p className="sidebar-title">Conversations</p>
+            <input
+              className="sidebar-search"
+              type="text"
+              placeholder="Search"
+              readOnly
+            />
+            <ul className="sidebar-list">
+              <li className="sidebar-item sidebar-item-active">
+                Automate 'Adele' Like <span>(Active)</span>
+              </li>
+              <li className="sidebar-item">Google Search Test</li>
+              <li className="sidebar-item">Product Pricing Macro</li>
+            </ul>
+            <button type="button" className="sidebar-add">
+              + New Chat
+            </button>
+          </section>
+          <section className="sidebar-group">
+            <p className="sidebar-title">Saved Workflows</p>
+            <ul className="sidebar-list">
+              <li className="sidebar-item">YouTube Adele Like (Run/Edit)</li>
+              <li className="sidebar-item">Gmail Archive (Run/Edit)</li>
+              <li className="sidebar-item">Data Entry Bot (Run/Edit)</li>
+              <li className="sidebar-item">import workflow</li>
+            </ul>
+          </section>
+        </aside>
         <section className="chat-panel">
           <header className="chat-header">
             <div>
-              <p className="eyebrow">Step 3</p>
-              <h1>ReplayPilot Chat</h1>
+              <h1>Automate 'Adele' Like</h1>
               <p className="subtitle">
                 Send instructions like a normal chat, and watch execution updates stream into the conversation.
               </p>
@@ -598,50 +638,6 @@ function App() {
               <div>
                 <dt>Run ID</dt>
                 <dd>{runId ?? 'none yet'}</dd>
-              </div>
-              <div>
-                <dt>Step</dt>
-                <dd>{runState?.step ?? 0}</dd>
-              </div>
-              <div>
-                <dt>Plan</dt>
-                <dd>
-                  {runState?.planSteps?.length
-                    ? `${completedPlanSteps}/${runState.planSteps.length} tracked`
-                    : draftPlan
-                      ? `${normalizeDraftPlanSteps(draftPlan.steps).length} draft steps`
-                      : 'none'}
-                </dd>
-              </div>
-              <div>
-                <dt>Updated</dt>
-                <dd>{formatTimestamp(runState?.updatedAt)}</dd>
-              </div>
-              <div>
-                <dt>Current Intent</dt>
-                <dd>{latestEntry?.note ?? 'none yet'}</dd>
-              </div>
-              <div>
-                <dt>Error</dt>
-                <dd>{runState?.error ?? requestError ?? 'none'}</dd>
-              </div>
-              <div>
-                <dt>Handoff</dt>
-                <dd>
-                  {runState?.handoff
-                    ? `${runState.handoff.reason} at ${runState.handoff.url}`
-                    : 'none'}
-                </dd>
-              </div>
-              <div>
-                <dt>Last Action</dt>
-                <dd>
-                  <pre className="json-block">
-                    {runState?.lastAction
-                      ? JSON.stringify(runState.lastAction, null, 2)
-                      : 'none yet'}
-                  </pre>
-                </dd>
               </div>
             </dl>
           </section>
