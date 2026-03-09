@@ -168,7 +168,14 @@ const getClient = (): GoogleGenAI => {
     throw new Error('GOOGLE_API_KEY is required for Gemini planning');
   }
 
-  return new GoogleGenAI({ apiKey });
+  const apiVersion = process.env.GEMINI_API_VERSION ?? 'v1alpha';
+
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      apiVersion,
+    },
+  } as unknown as ConstructorParameters<typeof GoogleGenAI>[0]);
 };
 
 const countTrailingIdenticalActions = (history: StepRecord[]): number => {
