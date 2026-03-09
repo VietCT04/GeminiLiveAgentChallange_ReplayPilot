@@ -9,12 +9,31 @@ declare module '@google/genai' {
               text: string;
             }
           | {
+              role: string;
+              parts: Array<
+                | {
+                    text: string;
+                  }
+                | {
+                    inlineData: {
+                      mimeType: string;
+                      data: string;
+                    };
+                  }
+              >;
+            }
+          | {
               inlineData: {
                 mimeType: string;
                 data: string;
               };
             }
         >;
+        tools?: Array<{
+          computerUse: {
+            environment: string;
+          };
+        }>;
         config?: {
           responseMimeType?: string;
           responseSchema?: unknown;

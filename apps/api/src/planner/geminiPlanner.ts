@@ -669,8 +669,15 @@ const generatePlannerOutput = async (
 ): Promise<PlannerResponseLog> => {
   const request = {
     model,
-    contents: requestLog.contents,
-    config: requestLog.config,
+    contents: [
+      {
+        role: 'user',
+        parts: requestLog.contents,
+      },
+    ],
+    config: {
+      tools: requestLog.config.tools,
+    },
   } as Parameters<typeof ai.models.generateContent>[0];
   const response = (await ai.models.generateContent(request)) as PlannerSdkResponse;
 
