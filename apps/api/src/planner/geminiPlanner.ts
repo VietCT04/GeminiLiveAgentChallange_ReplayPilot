@@ -653,7 +653,7 @@ const buildPlanContextText = (context: PlannerContext): string | null => {
     `Upcoming steps: ${JSON.stringify(remainingSteps)}`,
     'Prioritize completing the current step before jumping ahead.',
     'Do not prematurely submit a form if a later approved step explicitly says to click a submit/login button.',
-  ].join('\n');
+  ].join(', ');
 };
 
 export const planNextAction = async (
@@ -714,9 +714,17 @@ const generatePlannerOutput = async (
         const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${encodeURIComponent(
           model,
         )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const configRecord = (request.config ?? {}) as Record<string, unknown>;
+        const tools = Array.isArray(configRecord.tools) ? configRecord.tools : [];
+        const generationConfig = Object.fromEntries(
+          Object.entries(configRecord).filter(([key]) => key !== 'tools'),
+        );
         const body = {
           contents: request.contents,
-          ...(request.config ? { config: request.config } : {}),
+          ...(tools.length > 0 ? { tools } : {}),
+          ...(Object.keys(generationConfig).length > 0
+            ? { generationConfig }
+            : {}),
         };
 
         console.info('[planner] raw http body', JSON.stringify(body, null, 2));
