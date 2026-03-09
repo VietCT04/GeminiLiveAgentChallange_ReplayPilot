@@ -699,15 +699,7 @@ const generatePlannerOutput = async (
     },
   } as Parameters<typeof ai.models.generateContent>[0];
 
-  console.info('[planner] debug', {
-    model,
-    apiVersion: process.env.GEMINI_API_VERSION ?? 'v1alpha',
-    hasTools: !!requestLog.config?.tools?.length,
-    tools: requestLog.config?.tools,
-    contentsShape: Array.isArray(requestLog.contents)
-      ? requestLog.contents.map((part) => Object.keys(part))
-      : typeof requestLog.contents,
-  });
+  console.info('[planner] full request', JSON.stringify(request, null, 2));
 
   const response = (await ai.models.generateContent(request)) as PlannerSdkResponse;
 
