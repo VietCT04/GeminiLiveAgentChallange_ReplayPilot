@@ -54,6 +54,9 @@ type PlannerRequestLog = {
   viewport: PlannerViewport;
   prompt: string;
   config: {
+    responseMimeType?: string;
+    responseSchema?: unknown;
+    [key: string]: unknown;
     tools: Array<{
       computerUse: {
         environment: 'ENVIRONMENT_BROWSER';
@@ -674,6 +677,14 @@ const generatePlannerOutput = async (
   model: string,
   requestLog: PlannerRequestLog,
 ): Promise<PlannerResponseLog> => {
+  if (
+    requestLog.contents.some(
+      (part) => !('text' in part) && !('inlineData' in part),
+    )
+  ) {
+    throw new Error('Planner contents must be Part[] with text or inlineData entries');
+  }
+
   const request = {
     model,
     contents: [
@@ -683,9 +694,21 @@ const generatePlannerOutput = async (
       },
     ],
     config: {
+      ...requestLog.config,
       tools: requestLog.config.tools,
     },
   } as Parameters<typeof ai.models.generateContent>[0];
+
+  console.info('[planner] debug', {
+    model,
+    apiVersion: process.env.GEMINI_API_VERSION ?? 'v1alpha',
+    hasTools: !!requestLog.config?.tools?.length,
+    tools: requestLog.config?.tools,
+    contentsShape: Array.isArray(requestLog.contents)
+      ? requestLog.contents.map((part) => Object.keys(part))
+      : typeof requestLog.contents,
+  });
+
   const response = (await ai.models.generateContent(request)) as PlannerSdkResponse;
 
   const rawText = response.text?.trim() ?? '';
