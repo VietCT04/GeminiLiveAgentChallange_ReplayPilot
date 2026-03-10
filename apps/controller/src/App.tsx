@@ -555,6 +555,19 @@ function App() {
                 </p>
               </article>
             ))}
+            {isSendingMessage ? (
+              <article className="message-bubble message-assistant message-typing">
+                <p className="message-role">ReplayPilot</p>
+                <p className="message-text">
+                  Typing
+                  <span className="typing-dots" aria-hidden="true">
+                    <span>.</span>
+                    <span>.</span>
+                    <span>.</span>
+                  </span>
+                </p>
+              </article>
+            ) : null}
           </section>
 
           <section className="composer-card">

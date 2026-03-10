@@ -235,6 +235,10 @@ h1 {
   background: #ecf2ff;
 }
 
+.message-typing {
+  opacity: 0.9;
+}
+
 .message-role,
 .message-text,
 .message-time {
@@ -252,6 +256,26 @@ h1 {
   white-space: pre-wrap;
   font-size: 13px;
   line-height: 1.35;
+}
+
+.typing-dots {
+  display: inline-flex;
+  margin-left: 3px;
+  width: 18px;
+  justify-content: space-between;
+}
+
+.typing-dots span {
+  opacity: 0.2;
+  animation: typingPulse 1s infinite ease-in-out;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
 }
 
 .message-time {
@@ -536,6 +560,17 @@ dd {
 
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes typingPulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+  }
+  40% {
+    opacity: 1;
   }
 }
 
