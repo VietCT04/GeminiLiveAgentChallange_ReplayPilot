@@ -25,7 +25,10 @@ The repo is intentionally opinionated around one core idea: browser agents shoul
 
 The controller is a chat-style interface, but it is not just a text box:
 
-- Draft plan generation: `Generate Plan` and `Generate Computer Use Plan` request a high-level plan before execution starts.
+- Normal chat first: user messages go to backend chat (`POST /runs/chat`) and the assistant replies conversationally.
+- Workflow discovery: the assistant asks follow-up questions until automation requirements are complete.
+- Workflow proposal: once details are sufficient, the assistant sends a proposal in chat and enables plan generation.
+- Draft plan generation: `Generate Workflow Plan` requests a high-level plan before execution starts.
 - Plan editor: the user can review, edit, remove, and add plan steps before confirming.
 - Run controls: confirm, resume, and stop actions are available in the same panel.
 - Progress panel: the right side shows run state, plan progress, handoff status, and the latest screenshot.
@@ -52,7 +55,8 @@ The agent does not run immediately after a goal is entered.
 
 Instead:
 
-- `POST /runs/plan` generates a high-level plan first.
+- `POST /runs/chat` handles normal chat and workflow discovery/proposal.
+- `POST /runs/plan` generates a high-level plan after proposal confirmation.
 - The plan is shown to the user in the UI.
 - The user can edit the plan steps.
 - Only then does `POST /runs` or `POST /runs/computer-use` begin execution.
@@ -309,6 +313,21 @@ Output:
 - summary
 - steps
 
+### Chat Assistant
+
+- `POST /runs/chat`
+
+Input:
+
+- message
+- recent chat history (`role`, `text`)
+
+Output:
+
+- `assistantMessage`
+- `workflowPhase` (`CHAT`, `DISCOVERY`, `PROPOSAL`)
+- optional proposal fields (`proposalGoal`, `proposalSummary`)
+
 ### Start Run
 
 - `POST /runs`
@@ -393,6 +412,12 @@ URLs:
 - Controller: `http://localhost:5173`
 - API: `http://localhost:8080`
 - Health: `http://localhost:8080/health`
+
+### Local vs Cloud changes
+
+- Frontend-only changes: restart/refresh `apps/controller` locally (no push required for local testing).
+- Backend-only changes: restart `apps/api` locally (no push required for local testing).
+- To test on Cloud Run, push and redeploy backend/frontend services so remote revisions pick up your changes.
 
 ## Build
 

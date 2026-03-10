@@ -675,7 +675,16 @@ function App() {
                 type="button"
                 onClick={() =>
                   void generatePlan(
-                    pendingProposal?.goal ?? '',
+                    pendingProposal
+                      ? [
+                          pendingProposal.goal,
+                          pendingProposal.summary
+                            ? `Context:\n${pendingProposal.summary}`
+                            : '',
+                        ]
+                          .filter((part) => part.length > 0)
+                          .join('\n\n')
+                      : '',
                     'Failed to generate workflow plan',
                   )
                 }
