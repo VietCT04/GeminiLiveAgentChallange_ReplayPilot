@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
+import { withGeminiRetry } from '../lib/geminiRetry';
 
 const CHAT_MODEL_NAME =
   process.env.GEMINI_CHAT_MODEL ??
@@ -103,14 +104,18 @@ export const generateChatReply = async (
 ): Promise<ChatReply> => {
   const normalizedHistory = history.map((entry) => ChatMessageSchema.parse(entry));
   const ai = getClient();
-  const response = await ai.models.generateContent({
-    model: CHAT_MODEL_NAME,
-    contents: [{ text: buildChatPrompt(message, normalizedHistory) }],
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: ChatReplyResponseSchema,
-    },
-  });
+  const response = await withGeminiRetry(
+    async () =>
+      ai.models.generateContent({
+        model: CHAT_MODEL_NAME,
+        contents: [{ text: buildChatPrompt(message, normalizedHistory) }],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: ChatReplyResponseSchema,
+        },
+      }),
+    { label: 'chat-assistant' },
+  );
 
   const rawText = response.text?.trim() ?? '';
 

@@ -1,6 +1,7 @@
 import { ActionSchema, type Action, type StepRecord } from '@replaypilot/shared';
 import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
+import { withGeminiRetry } from '../lib/geminiRetry';
 
 const COMPUTER_USE_MODEL_NAME =
   process.env.GEMINI_COMPUTER_USE_MODEL ??
@@ -704,7 +705,8 @@ const generatePlannerOutput = async (
 
   const useRawHttp = (process.env.GEMINI_PLANNER_RAW_HTTP ?? 'true').toLowerCase() === 'true';
   const response = useRawHttp
-    ? ((await (async (): Promise<PlannerSdkResponse> => {
+    ? (await withGeminiRetry(
+        async (): Promise<PlannerSdkResponse> => {
         const apiKey = process.env.GOOGLE_API_KEY;
         if (!apiKey) {
           throw new Error('GOOGLE_API_KEY is required for Gemini planning');
@@ -745,8 +747,13 @@ const generatePlannerOutput = async (
 
         const parsed = (await rawResponse.json()) as PlannerSdkResponse;
         return parsed;
-      })()) as PlannerSdkResponse)
-    : ((await ai.models.generateContent(request)) as PlannerSdkResponse);
+      },
+        { label: 'planner-raw-http' },
+      ))
+    : ((await withGeminiRetry(
+        async () => ai.models.generateContent(request),
+        { label: 'planner-sdk' },
+      )) as PlannerSdkResponse);
 
   const rawTextFromCandidates =
     response.candidates

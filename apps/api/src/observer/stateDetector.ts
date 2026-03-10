@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
+import { withGeminiRetry } from '../lib/geminiRetry';
 
 const MODEL_NAME = 'gemini-2.5-flash';
 
@@ -159,22 +160,26 @@ export const detectState = async (
   const prompt = buildPrompt(url);
   const ai = getClient();
 
-  const response = await ai.models.generateContent({
-    model: MODEL_NAME,
-    contents: [
-      { text: prompt },
-      {
-        inlineData: {
-          mimeType: 'image/png',
-          data: screenshotBytes.toString('base64'),
+  const response = await withGeminiRetry(
+    async () =>
+      ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: [
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType: 'image/png',
+              data: screenshotBytes.toString('base64'),
+            },
+          },
+        ],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: StateDetectionResponseSchema,
         },
-      },
-    ],
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: StateDetectionResponseSchema,
-    },
-  });
+      }),
+    { label: 'state-detector' },
+  );
 
   const rawText = response.text?.trim() ?? '';
 

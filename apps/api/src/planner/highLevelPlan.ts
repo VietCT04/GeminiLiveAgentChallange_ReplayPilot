@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
+import { withGeminiRetry } from '../lib/geminiRetry';
 
 const HIGH_LEVEL_PLAN_MODEL_NAME =
   process.env.GEMINI_HIGH_LEVEL_PLAN_MODEL ?? 'gemini-2.5-flash';
@@ -86,14 +87,18 @@ export const generateHighLevelPlan = async (
   goal: string,
 ): Promise<HighLevelPlan> => {
   const ai = getClient();
-  const response = await ai.models.generateContent({
-    model: HIGH_LEVEL_PLAN_MODEL_NAME,
-    contents: [{ text: buildHighLevelPlanPrompt(goal) }],
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: HighLevelPlanResponseSchema,
-    },
-  });
+  const response = await withGeminiRetry(
+    async () =>
+      ai.models.generateContent({
+        model: HIGH_LEVEL_PLAN_MODEL_NAME,
+        contents: [{ text: buildHighLevelPlanPrompt(goal) }],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: HighLevelPlanResponseSchema,
+        },
+      }),
+    { label: 'high-level-plan' },
+  );
   const rawText = response.text?.trim() ?? '';
 
   if (!rawText) {

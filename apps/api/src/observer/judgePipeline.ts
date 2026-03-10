@@ -3,6 +3,7 @@ import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
 import type { HumanHandoffReason } from '@replaypilot/shared';
 import { detectState, type StateDetection } from './stateDetector';
+import { withGeminiRetry } from '../lib/geminiRetry';
 
 const MODEL_NAME =
   process.env.GEMINI_JUDGE_MODEL ?? process.env.GEMINI_HIGH_LEVEL_PLAN_MODEL ?? 'gemini-2.5-flash';
@@ -142,22 +143,26 @@ const buildVisionJudgePrompt = (input: JudgeInput): string => {
 
 const runVisionJudge = async (input: JudgeInput): Promise<z.infer<typeof VisionJudgeSchema>> => {
   const ai = getClient();
-  const response = await ai.models.generateContent({
-    model: MODEL_NAME,
-    contents: [
-      { text: buildVisionJudgePrompt(input) },
-      {
-        inlineData: {
-          mimeType: 'image/png',
-          data: input.screenshotBytes.toString('base64'),
+  const response = await withGeminiRetry(
+    async () =>
+      ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: [
+          { text: buildVisionJudgePrompt(input) },
+          {
+            inlineData: {
+              mimeType: 'image/png',
+              data: input.screenshotBytes.toString('base64'),
+            },
+          },
+        ],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: VisionJudgeResponseSchema,
         },
-      },
-    ],
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: VisionJudgeResponseSchema,
-    },
-  });
+      }),
+    { label: 'vision-judge' },
+  );
   const rawText = response.text?.trim() ?? '';
 
   if (!rawText) {
