@@ -10,8 +10,6 @@ import { useEffect, useRef, useState } from 'react';
 import { API_BASE_URL, USE_ORCHESTRATOR_START } from './config';
 
 const terminalStatuses = new Set(['success', 'fail', 'stopped']);
-const defaultGoal =
-  'Open YouTube, search Adele Hello official music video, open top result, attempt Like. Success if Like toggles on or sign in prompt appears.';
 
 type ChatMessage = {
   id: string;
@@ -60,17 +58,22 @@ const summarizeAction = (
 function App() {
   const [runId, setRunId] = useState<string | null>(null);
   const [runState, setRunState] = useState<RunState | null>(null);
-  const [goal, setGoal] = useState(defaultGoal);
+  const [goal, setGoal] = useState('');
+  const [planGoal, setPlanGoal] = useState('');
   const [requestError, setRequestError] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [draftPlan, setDraftPlan] = useState<DraftPlan | null>(null);
+  const [workflowProposal, setWorkflowProposal] = useState<{
+    goal: string;
+    reason: string;
+  } | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'intro',
       role: 'system',
-      text: 'Send an instruction to start a run. Progress updates will appear here while processing details stay on the right.',
+      text: 'Chat normally. Ask to build a workflow when you want automation.',
       timestamp: Date.now(),
     },
   ]);
@@ -149,16 +152,17 @@ function App() {
     }, 1000);
   };
 
-  const generatePlan = async (failureMessage: string): Promise<void> => {
+  const generatePlan = async (
+    goalInput: string,
+    failureMessage: string,
+  ): Promise<void> => {
     setRequestError(null);
     setIsGeneratingPlan(true);
 
     try {
       const requestBody = GeneratePlanRequestSchema.parse({
-        goal,
+        goal: goalInput,
       });
-
-      appendMessage('user', goal);
 
       const response = await fetch(`${API_BASE_URL}/runs/plan`, {
         method: 'POST',
@@ -181,6 +185,8 @@ function App() {
         steps: payload.steps,
         runMode: 'computer-use',
       });
+      setPlanGoal(goalInput);
+      setWorkflowProposal(null);
       appendMessage(
         'system',
         'Draft plan generated. Review the steps, edit them if needed, then confirm the run.',
@@ -214,7 +220,7 @@ function App() {
     try {
       const approvedPlanSteps = normalizeDraftPlanSteps(draftPlan.steps);
       const requestBody = StartRunRequestSchema.parse({
-        goal,
+        goal: planGoal,
         planSteps: approvedPlanSteps,
       });
       const endpointPath =
@@ -258,8 +264,67 @@ function App() {
     }
   };
 
-  const handleComputerUseClick = async (): Promise<void> => {
-    await generatePlan('Failed to generate plan');
+  const detectWorkflowIntent = (text: string): boolean => {
+    const normalized = text.toLowerCase();
+    return (
+      normalized.includes('build me a workflow for') ||
+      normalized.includes('create a workflow for') ||
+      normalized.includes('automation workflow') ||
+      (normalized.includes('workflow') && normalized.includes('for'))
+    );
+  };
+
+  const detectRepeatedTaskIntent = (text: string): boolean => {
+    const recentUserMessages = messages
+      .filter((message) => message.role === 'user')
+      .slice(-3)
+      .map((message) => message.text.toLowerCase());
+    const taskKeywords = ['open', 'search', 'login', 'fill', 'click', 'upload', 'submit'];
+    const current = text.toLowerCase();
+    const currentTaskLike = taskKeywords.some((keyword) => current.includes(keyword));
+    const recentTaskLikeCount = recentUserMessages.filter((message) =>
+      taskKeywords.some((keyword) => message.includes(keyword)),
+    ).length;
+    return currentTaskLike && recentTaskLikeCount >= 2;
+  };
+
+  const buildProposalGoal = (text: string): string => {
+    const match = text.match(/workflow for\s+(.+)/i);
+    return (match?.[1] ?? text).trim();
+  };
+
+  const handleSendClick = (): void => {
+    const message = goal.trim();
+
+    if (!message) {
+      return;
+    }
+
+    appendMessage('user', message);
+    setGoal('');
+
+    const shouldProposeWorkflow =
+      detectWorkflowIntent(message) || detectRepeatedTaskIntent(message);
+
+    if (shouldProposeWorkflow) {
+      const proposalGoal = buildProposalGoal(message);
+      setWorkflowProposal({
+        goal: proposalGoal,
+        reason: detectWorkflowIntent(message)
+          ? 'You asked to build a workflow.'
+          : 'I detected a repeated multi-step task pattern.',
+      });
+      appendMessage(
+        'assistant',
+        'I can turn this into an executable workflow. Review the proposal card and generate a draft plan when ready.',
+      );
+      return;
+    }
+
+    appendMessage(
+      'assistant',
+      'Understood. If you want automation, ask me to build a workflow and I will propose a plan card.',
+    );
   };
 
   const handleStopClick = async (): Promise<void> => {
@@ -578,11 +643,8 @@ function App() {
               </section>
             ) : null}
             <div className="button-row">
-              <button
-                type="button"
-                onClick={() => void handleComputerUseClick()}
-              >
-                Generate Computer Use Plan
+              <button type="button" onClick={() => void handleSendClick()}>
+                Send
               </button>
               <button
                 type="button"
@@ -618,6 +680,35 @@ function App() {
               </button>
             </div>
           </section>
+          {workflowProposal && !draftPlan ? (
+            <section className="proposal-card">
+              <p className="eyebrow">Workflow Proposal</p>
+              <p className="proposal-reason">{workflowProposal.reason}</p>
+              <p className="proposal-goal">{workflowProposal.goal}</p>
+              <div className="proposal-actions">
+                <button
+                  type="button"
+                  onClick={() =>
+                    void generatePlan(
+                      workflowProposal.goal,
+                      'Failed to generate workflow plan',
+                    )
+                  }
+                  disabled={isGeneratingPlan}
+                >
+                  Generate Workflow Plan
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWorkflowProposal(null);
+                  }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </section>
+          ) : null}
         </section>
 
         <aside className="status-panel">

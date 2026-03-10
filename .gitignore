@@ -4,3 +4,4 @@ dist/
 .env
 *.log
 apps/api/data
+AGENTS.md
