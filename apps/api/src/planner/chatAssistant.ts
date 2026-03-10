@@ -15,9 +15,9 @@ export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
 const ChatReplySchema = z.object({
   assistantMessage: z.string().trim().min(1).max(2000),
-  workflowIntent: z.boolean(),
-  workflowGoal: z.string().trim().min(1).max(500).optional(),
-  workflowReason: z.string().trim().min(1).max(500).optional(),
+  workflowPhase: z.enum(['CHAT', 'DISCOVERY', 'PROPOSAL']),
+  proposalGoal: z.string().trim().min(1).max(500).optional(),
+  proposalSummary: z.string().trim().min(1).max(800).optional(),
 });
 
 export type ChatReply = z.infer<typeof ChatReplySchema>;
@@ -26,11 +26,14 @@ const ChatReplyResponseSchema = {
   type: 'OBJECT',
   properties: {
     assistantMessage: { type: 'STRING' },
-    workflowIntent: { type: 'BOOLEAN' },
-    workflowGoal: { type: 'STRING' },
-    workflowReason: { type: 'STRING' },
+    workflowPhase: {
+      type: 'STRING',
+      enum: ['CHAT', 'DISCOVERY', 'PROPOSAL'],
+    },
+    proposalGoal: { type: 'STRING' },
+    proposalSummary: { type: 'STRING' },
   },
-  required: ['assistantMessage', 'workflowIntent'],
+  required: ['assistantMessage', 'workflowPhase'],
 } as const;
 
 const getClient = (): GoogleGenAI => {
@@ -51,11 +54,22 @@ const buildChatPrompt = (message: string, history: ChatMessage[]): string => {
 
   return [
     'You are ReplayPilot chat assistant.',
-    'Respond conversationally and helpfully to the user message.',
-    'Also classify if user currently has workflow intent.',
-    'workflowIntent=true only when user asks to build/automate a multi-step browser workflow.',
-    'For casual Q&A (weather, definitions, chit-chat), workflowIntent=false.',
-    'If workflowIntent=true, include a concise workflowGoal and workflowReason.',
+    'Follow this control flow strictly:',
+    'Phase CHAT: normal conversation for non-automation requests.',
+    'Phase DISCOVERY: user wants automation but details are incomplete; ask concise follow-up questions.',
+    'Phase PROPOSAL: only when details are sufficient, provide a concise workflow proposal.',
+    'A sufficient proposal includes all required fields:',
+    '- task to automate',
+    '- target app/site or URL',
+    '- trigger/start condition',
+    '- success criteria',
+    '- sensitive/login/approval notes',
+    'If user only says "I want a workflow" or similar, do NOT jump to proposal; stay DISCOVERY.',
+    'If required fields are incomplete, stay DISCOVERY and ask only for the missing fields.',
+    'If required fields are complete and user asks to proceed (e.g. "build the workflow", "build now", "yes proceed"), return PROPOSAL immediately.',
+    'When in PROPOSAL, assistantMessage must include a compact proposal summary and mention that user can click Generate Workflow Plan.',
+    'Set proposalGoal only when workflowPhase=PROPOSAL.',
+    'Set proposalSummary only when workflowPhase=PROPOSAL.',
     compactHistory ? `Conversation history:\n${compactHistory}` : 'Conversation history: none',
     `Latest user message: ${message}`,
     'Return JSON only.',

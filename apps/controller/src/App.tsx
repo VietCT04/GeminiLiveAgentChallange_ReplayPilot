@@ -20,9 +20,9 @@ type ChatMessage = {
 
 type ChatAssistantResponse = {
   assistantMessage: string;
-  workflowIntent: boolean;
-  workflowGoal?: string;
-  workflowReason?: string;
+  workflowPhase: 'CHAT' | 'DISCOVERY' | 'PROPOSAL';
+  proposalGoal?: string;
+  proposalSummary?: string;
 };
 
 type DraftPlan = {
@@ -73,9 +73,9 @@ function App() {
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [draftPlan, setDraftPlan] = useState<DraftPlan | null>(null);
-  const [workflowProposal, setWorkflowProposal] = useState<{
+  const [pendingProposal, setPendingProposal] = useState<{
     goal: string;
-    reason: string;
+    summary?: string;
   } | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -194,7 +194,7 @@ function App() {
         runMode: 'computer-use',
       });
       setPlanGoal(goalInput);
-      setWorkflowProposal(null);
+      setPendingProposal(null);
       appendMessage(
         'system',
         'Draft plan generated. Review the steps, edit them if needed, then confirm the run.',
@@ -305,15 +305,19 @@ function App() {
       const payload = (await response.json()) as ChatAssistantResponse;
       appendMessage('assistant', payload.assistantMessage);
 
-      if (payload.workflowIntent) {
-        setWorkflowProposal({
-          goal: payload.workflowGoal?.trim() || message,
-          reason:
-            payload.workflowReason?.trim() ||
-            'The assistant detected workflow intent from your request.',
+      if (payload.workflowPhase === 'PROPOSAL') {
+        const proposalGoal = payload.proposalGoal?.trim() || message;
+        const proposalSummary = payload.proposalSummary?.trim();
+        setPendingProposal({
+          goal: proposalGoal,
+          ...(proposalSummary ? { summary: proposalSummary } : {}),
         });
-      } else {
-        setWorkflowProposal(null);
+        appendMessage(
+          'system',
+          'Proposal is ready. Click Generate Workflow Plan to continue.',
+        );
+      } else if (payload.workflowPhase === 'CHAT') {
+        setPendingProposal(null);
       }
     } catch (error) {
       const fallback =
@@ -669,6 +673,18 @@ function App() {
               </button>
               <button
                 type="button"
+                onClick={() =>
+                  void generatePlan(
+                    pendingProposal?.goal ?? '',
+                    'Failed to generate workflow plan',
+                  )
+                }
+                disabled={!pendingProposal || isGeneratingPlan || isSendingMessage}
+              >
+                Generate Workflow Plan
+              </button>
+              <button
+                type="button"
                 onClick={() => void startRun()}
                 disabled={!draftPlan || isStartingRun || isGeneratingPlan || isSendingMessage}
               >
@@ -678,10 +694,11 @@ function App() {
                 type="button"
                 onClick={() => {
                   setDraftPlan(null);
+                  setPendingProposal(null);
                 }}
-                disabled={!draftPlan}
+                disabled={!draftPlan && !pendingProposal}
               >
-                Clear Draft
+                Clear
               </button>
               <button
                 type="button"
@@ -709,35 +726,6 @@ function App() {
               </button>
             </div>
           </section>
-          {workflowProposal && !draftPlan ? (
-            <section className="proposal-card">
-              <p className="eyebrow">Workflow Proposal</p>
-              <p className="proposal-reason">{workflowProposal.reason}</p>
-              <p className="proposal-goal">{workflowProposal.goal}</p>
-              <div className="proposal-actions">
-                <button
-                  type="button"
-                  onClick={() =>
-                    void generatePlan(
-                      workflowProposal.goal,
-                      'Failed to generate workflow plan',
-                    )
-                  }
-                  disabled={isGeneratingPlan}
-                >
-                  Generate Workflow Plan
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setWorkflowProposal(null);
-                  }}
-                >
-                  Dismiss
-                </button>
-              </div>
-            </section>
-          ) : null}
         </section>
 
         <aside className="status-panel">

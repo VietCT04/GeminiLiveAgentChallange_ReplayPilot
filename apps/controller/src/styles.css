@@ -291,32 +291,6 @@ h1 {
   border: 1px solid #ccd3dd;
 }
 
-.proposal-card {
-  border: 1px solid #c7d2c0;
-  background: #edf7ea;
-  border-radius: 8px;
-  padding: 10px;
-}
-
-.proposal-reason {
-  margin: 0;
-  font-size: 12px;
-  color: #36554b;
-}
-
-.proposal-goal {
-  margin: 6px 0 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: #1f2937;
-}
-
-.proposal-actions {
-  margin-top: 10px;
-  display: flex;
-  gap: 8px;
-}
-
 .eyebrow {
   margin: 0 0 6px;
   font-size: 11px;
