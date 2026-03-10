@@ -5,8 +5,8 @@ const HIGH_LEVEL_PLAN_MODEL_NAME =
   process.env.GEMINI_HIGH_LEVEL_PLAN_MODEL ?? 'gemini-2.5-flash';
 
 const HighLevelPlanSchema = z.object({
-  summary: z.string().min(1).max(200),
-  steps: z.array(z.string().min(1).max(200)).min(1).max(12),
+  summary: z.string().min(1),
+  steps: z.array(z.string().min(1).max(200)).min(1),
 });
 
 export type HighLevelPlan = z.infer<typeof HighLevelPlanSchema>;

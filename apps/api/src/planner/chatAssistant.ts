@@ -17,7 +17,7 @@ const ChatReplySchema = z.object({
   assistantMessage: z.string().trim().min(1).max(2000),
   workflowPhase: z.enum(['CHAT', 'DISCOVERY', 'PROPOSAL']),
   proposalGoal: z.string().trim().min(1).max(500).optional(),
-  proposalSummary: z.string().trim().min(1).max(800).optional(),
+  proposalSummary: z.string().trim().min(1).optional(),
 });
 
 export type ChatReply = z.infer<typeof ChatReplySchema>;
