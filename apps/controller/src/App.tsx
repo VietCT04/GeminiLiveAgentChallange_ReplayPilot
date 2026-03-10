@@ -18,6 +18,13 @@ type ChatMessage = {
   timestamp: number;
 };
 
+type ChatAssistantResponse = {
+  assistantMessage: string;
+  workflowIntent: boolean;
+  workflowGoal?: string;
+  workflowReason?: string;
+};
+
 type DraftPlan = {
   summary: string;
   steps: string[];
@@ -62,6 +69,7 @@ function App() {
   const [planGoal, setPlanGoal] = useState('');
   const [requestError, setRequestError] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [draftPlan, setDraftPlan] = useState<DraftPlan | null>(null);
@@ -264,36 +272,7 @@ function App() {
     }
   };
 
-  const detectWorkflowIntent = (text: string): boolean => {
-    const normalized = text.toLowerCase();
-    return (
-      normalized.includes('build me a workflow for') ||
-      normalized.includes('create a workflow for') ||
-      normalized.includes('automation workflow') ||
-      (normalized.includes('workflow') && normalized.includes('for'))
-    );
-  };
-
-  const detectRepeatedTaskIntent = (text: string): boolean => {
-    const recentUserMessages = messages
-      .filter((message) => message.role === 'user')
-      .slice(-3)
-      .map((message) => message.text.toLowerCase());
-    const taskKeywords = ['open', 'search', 'login', 'fill', 'click', 'upload', 'submit'];
-    const current = text.toLowerCase();
-    const currentTaskLike = taskKeywords.some((keyword) => current.includes(keyword));
-    const recentTaskLikeCount = recentUserMessages.filter((message) =>
-      taskKeywords.some((keyword) => message.includes(keyword)),
-    ).length;
-    return currentTaskLike && recentTaskLikeCount >= 2;
-  };
-
-  const buildProposalGoal = (text: string): string => {
-    const match = text.match(/workflow for\s+(.+)/i);
-    return (match?.[1] ?? text).trim();
-  };
-
-  const handleSendClick = (): void => {
+  const handleSendClick = async (): Promise<void> => {
     const message = goal.trim();
 
     if (!message) {
@@ -302,29 +281,48 @@ function App() {
 
     appendMessage('user', message);
     setGoal('');
+    setIsSendingMessage(true);
 
-    const shouldProposeWorkflow =
-      detectWorkflowIntent(message) || detectRepeatedTaskIntent(message);
-
-    if (shouldProposeWorkflow) {
-      const proposalGoal = buildProposalGoal(message);
-      setWorkflowProposal({
-        goal: proposalGoal,
-        reason: detectWorkflowIntent(message)
-          ? 'You asked to build a workflow.'
-          : 'I detected a repeated multi-step task pattern.',
+    try {
+      const response = await fetch(`${API_BASE_URL}/runs/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message,
+          history: messages.slice(-8).map((entry) => ({
+            role: entry.role,
+            text: entry.text,
+          })),
+        }),
       });
-      appendMessage(
-        'assistant',
-        'I can turn this into an executable workflow. Review the proposal card and generate a draft plan when ready.',
-      );
-      return;
-    }
 
-    appendMessage(
-      'assistant',
-      'Understood. If you want automation, ask me to build a workflow and I will propose a plan card.',
-    );
+      if (!response.ok) {
+        throw new Error('Failed to get assistant response');
+      }
+
+      const payload = (await response.json()) as ChatAssistantResponse;
+      appendMessage('assistant', payload.assistantMessage);
+
+      if (payload.workflowIntent) {
+        setWorkflowProposal({
+          goal: payload.workflowGoal?.trim() || message,
+          reason:
+            payload.workflowReason?.trim() ||
+            'The assistant detected workflow intent from your request.',
+        });
+      } else {
+        setWorkflowProposal(null);
+      }
+    } catch (error) {
+      const fallback =
+        error instanceof Error ? error.message : 'Failed to process message';
+      setRequestError(fallback);
+      appendMessage('system', fallback);
+    } finally {
+      setIsSendingMessage(false);
+    }
   };
 
   const handleStopClick = async (): Promise<void> => {
@@ -452,7 +450,11 @@ function App() {
   const isRunning = runState?.status === 'running';
   const isWaitingForHuman = runState?.status === 'waiting_for_human';
   const isActive =
-    isRunning || isPolling || isWaitingForHuman || isGeneratingPlan;
+    isRunning ||
+    isPolling ||
+    isWaitingForHuman ||
+    isGeneratingPlan ||
+    isSendingMessage;
   const latestEntry =
     runState && runState.history.length > 0
       ? runState.history[runState.history.length - 1]
@@ -567,6 +569,12 @@ function App() {
               onChange={(event) => {
                 setGoal(event.target.value);
               }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void handleSendClick();
+                }
+              }}
               placeholder="Tell ReplayPilot what to do next..."
             />
             {draftPlan ? (
@@ -649,7 +657,7 @@ function App() {
               <button
                 type="button"
                 onClick={() => void startRun()}
-                disabled={!draftPlan || isStartingRun || isGeneratingPlan}
+                disabled={!draftPlan || isStartingRun || isGeneratingPlan || isSendingMessage}
               >
                 Confirm Computer Use
               </button>
@@ -665,7 +673,12 @@ function App() {
               <button
                 type="button"
                 onClick={() => void handleResumeClick()}
-                disabled={!isWaitingForHuman || isGeneratingPlan || isStartingRun}
+                disabled={
+                  !isWaitingForHuman ||
+                  isGeneratingPlan ||
+                  isStartingRun ||
+                  isSendingMessage
+                }
               >
                 Resume
               </button>
@@ -673,7 +686,10 @@ function App() {
                 type="button"
                 onClick={() => void handleStopClick()}
                 disabled={
-                  (!isRunning && !isWaitingForHuman) || isGeneratingPlan || isStartingRun
+                  (!isRunning && !isWaitingForHuman) ||
+                  isGeneratingPlan ||
+                  isStartingRun ||
+                  isSendingMessage
                 }
               >
                 Stop

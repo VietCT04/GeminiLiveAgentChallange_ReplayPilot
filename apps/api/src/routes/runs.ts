@@ -27,6 +27,7 @@ import {
   planComputerUseStepDetailed,
 } from '../planner/geminiPlanner';
 import { generateHighLevelPlan } from '../planner/highLevelPlan';
+import { generateChatReply } from '../planner/chatAssistant';
 
 const allowedArtifactExtensions = new Set(['.png', '.jpg', '.jpeg', '.json']);
 const defaultViewport = {
@@ -57,6 +58,19 @@ const OrchestratorReportStepRequestSchema = z.object({
   currentUrl: z.string().trim().min(1),
   previousUrl: z.string().trim().min(1).nullable().optional(),
   previousScreenshotHash: z.string().trim().min(1).nullable().optional(),
+});
+
+const ChatAssistantRequestSchema = z.object({
+  message: z.string().trim().min(1).max(2000),
+  history: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant', 'system']),
+        text: z.string().trim().min(1).max(2000),
+      }),
+    )
+    .max(20)
+    .default([]),
 });
 
 const isNotFoundError = (error: unknown): boolean => {
@@ -170,6 +184,23 @@ const startRunWithoutBackground = async (
 };
 
 export const runsRoutes: FastifyPluginAsync = async (app) => {
+  app.post('/chat', async (request, reply) => {
+    const parsedBody = ChatAssistantRequestSchema.safeParse(request.body);
+
+    if (!parsedBody.success) {
+      return reply.code(400).send({
+        message: 'Invalid chat request',
+        issues: parsedBody.error.issues,
+      });
+    }
+
+    const response = await generateChatReply(
+      parsedBody.data.message,
+      parsedBody.data.history,
+    );
+    return reply.send(response);
+  });
+
   app.post('/plan', async (request, reply) => {
     const parsedBody = GeneratePlanRequestSchema.safeParse(request.body);
 
