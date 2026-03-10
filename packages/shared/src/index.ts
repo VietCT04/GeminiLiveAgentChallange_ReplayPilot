@@ -126,14 +126,14 @@ export const RunStateSchema = z.object({
 export type RunState = z.infer<typeof RunStateSchema>;
 
 export const StartRunRequestSchema = z.object({
-  goal: z.string().trim().min(1).max(500),
+  goal: z.string().trim().min(1),
   planSteps: z.array(z.string().trim().min(1).max(200)).optional(),
 });
 
 export type StartRunRequest = z.infer<typeof StartRunRequestSchema>;
 
 export const GeneratePlanRequestSchema = z.object({
-  goal: z.string().trim().min(1).max(500),
+  goal: z.string().trim().min(1),
 });
 
 export type GeneratePlanRequest = z.infer<typeof GeneratePlanRequestSchema>;
