@@ -1,5 +1,6 @@
 import { chromium, type Page } from 'playwright';
 import { config as loadEnv } from 'dotenv';
+import { createHash } from 'node:crypto';
 import {
   ActionSchema,
   type Action,
@@ -97,6 +98,14 @@ const takeScreenshotBase64 = async (page: Page): Promise<string> => {
     type: 'png',
   });
   return bytes.toString('base64');
+};
+
+const hashScreenshotBase64 = (base64: string): string => {
+  const normalized = base64.includes(',')
+    ? base64.slice(base64.indexOf(',') + 1)
+    : base64;
+  const bytes = Buffer.from(normalized, 'base64');
+  return createHash('sha256').update(bytes).digest('hex');
 };
 
 const denormalizeCoordinate = (value: number, size: number): number => {
@@ -364,28 +373,9 @@ const executeRun = async (
       waitUntil: 'domcontentloaded',
       timeout: 15000,
     });
-
-    const currentRunState = await getJson<RunState>(orchestratorBaseUrl, `/runs/${runId}`);
-    if (currentRunState.history.length === 0) {
-      const initialScreenshotBase64 = await takeScreenshotBase64(page);
-      const initialReport = await postJson<ReportStepResponse>(
-        orchestratorBaseUrl,
-        `/runs/${runId}/orchestrator/report-step`,
-        {
-          action: {
-            type: 'navigate',
-            url: DEFAULT_START_URL,
-          },
-          summary: 'Opened Google automatically as the start page',
-          screenshotBase64: initialScreenshotBase64,
-          currentUrl: page.url(),
-          previousUrl,
-          previousScreenshotHash,
-        },
-      );
-      previousUrl = page.url();
-      previousScreenshotHash = initialReport.screenshotHash;
-    }
+    const initialScreenshotBase64 = await takeScreenshotBase64(page);
+    previousUrl = page.url();
+    previousScreenshotHash = hashScreenshotBase64(initialScreenshotBase64);
 
     for (;;) {
       const plannerScreenshotBase64 = await takeScreenshotBase64(page);

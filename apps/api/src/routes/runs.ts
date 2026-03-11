@@ -350,6 +350,7 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
         const screenshotBytes = decodeScreenshotBytes(parsedBody.data.screenshotBase64);
 
         await writeFile(screenshotPath, screenshotBytes);
+
         await appendHistory(runState.runId, {
           index,
           ts: Date.now(),
