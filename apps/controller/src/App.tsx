@@ -76,6 +76,7 @@ function App() {
   const [isPreparingInputs, setIsPreparingInputs] = useState(false);
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [draftPlan, setDraftPlan] = useState<DraftPlan | null>(null);
+  const [showDraftPlanModal, setShowDraftPlanModal] = useState(false);
   const [workflowInputs, setWorkflowInputs] = useState<Record<string, string>>({});
   const [workflowInputDefs, setWorkflowInputDefs] = useState<WorkflowInput[]>([]);
   const [showInputsPanel, setShowInputsPanel] = useState(false);
@@ -252,6 +253,7 @@ function App() {
         steps: payload.steps,
         runMode: 'computer-use',
       });
+      setShowDraftPlanModal(true);
       setPlanGoal(goalInput);
       setPendingProposal(null);
       appendMessage(
@@ -738,79 +740,6 @@ function App() {
               }}
               placeholder="Tell ReplayPilot what to do next..."
             />
-            {draftPlan ? (
-              <section className="plan-editor">
-                <div className="plan-header-row">
-                  <div>
-                    <p className="eyebrow">Draft Plan</p>
-                    <p className="plan-summary">{draftPlan.summary}</p>
-                  </div>
-                  <span className="step-counter">
-                    {draftPlan.steps.length} steps
-                  </span>
-                </div>
-                <div className="plan-step-list">
-                  {draftPlan.steps.map((step, index) => (
-                    <div className="plan-step-row" key={`${index}-${step}`}>
-                      <span className="plan-step-index">{index + 1}</span>
-                      <textarea
-                        className="plan-step-input"
-                        rows={2}
-                        value={step}
-                        onChange={(event) => {
-                          setDraftPlan((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  steps: current.steps.map((item, itemIndex) =>
-                                    itemIndex === index ? event.target.value : item,
-                                  ),
-                                }
-                              : current,
-                          );
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDraftPlan((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  steps:
-                                    current.steps.length > 1
-                                      ? current.steps.filter(
-                                          (_item, itemIndex) => itemIndex !== index,
-                                        )
-                                      : current.steps,
-                                }
-                              : current,
-                          );
-                        }}
-                        disabled={draftPlan.steps.length <= 1}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDraftPlan((current) =>
-                      current
-                        ? {
-                            ...current,
-                            steps: [...current.steps, ''],
-                          }
-                        : current,
-                    );
-                  }}
-                >
-                  Add Step
-                </button>
-              </section>
-            ) : null}
             <div className="button-row">
               <button type="button" onClick={() => void handleSendClick()}>
                 Send
@@ -884,7 +813,17 @@ function App() {
               <button
                 type="button"
                 onClick={() => {
+                  setShowDraftPlanModal(true);
+                }}
+                disabled={!draftPlan || isStartingRun || isGeneratingPlan || isSendingMessage}
+              >
+                Draft Plan
+              </button>
+              <button
+                type="button"
+                onClick={() => {
                   setDraftPlan(null);
+                  setShowDraftPlanModal(false);
                   setPendingProposal(null);
                 }}
                 disabled={!draftPlan && !pendingProposal}
@@ -1086,6 +1025,107 @@ function App() {
                 onClick={() => {
                   setShowInputsPanel(false);
                   setPendingPlanGenerationGoal(null);
+                }}
+              >
+                Save
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
+      {showDraftPlanModal && draftPlan ? (
+        <div
+          className="inputs-modal-overlay"
+          onClick={() => {
+            setShowDraftPlanModal(false);
+          }}
+        >
+          <section
+            className="inputs-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Draft plan"
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <header className="inputs-modal-header">
+              <h2>Draft Plan</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDraftPlanModal(false);
+                }}
+              >
+                Close
+              </button>
+            </header>
+            <p className="inputs-modal-subtitle">{draftPlan.summary}</p>
+            <div className="inputs-modal-list">
+              {draftPlan.steps.map((step, index) => (
+                <div className="plan-step-row" key={`${index}-${step}`}>
+                  <span className="plan-step-index">{index + 1}</span>
+                  <textarea
+                    className="plan-step-input"
+                    rows={2}
+                    value={step}
+                    onChange={(event) => {
+                      setDraftPlan((current) =>
+                        current
+                          ? {
+                              ...current,
+                              steps: current.steps.map((item, itemIndex) =>
+                                itemIndex === index ? event.target.value : item,
+                              ),
+                            }
+                          : current,
+                      );
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraftPlan((current) =>
+                        current
+                          ? {
+                              ...current,
+                              steps:
+                                current.steps.length > 1
+                                  ? current.steps.filter(
+                                      (_item, itemIndex) => itemIndex !== index,
+                                    )
+                                  : current.steps,
+                            }
+                          : current,
+                      );
+                    }}
+                    disabled={draftPlan.steps.length <= 1}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+            <footer className="inputs-modal-footer">
+              <button
+                type="button"
+                onClick={() => {
+                  setDraftPlan((current) =>
+                    current
+                      ? {
+                          ...current,
+                          steps: [...current.steps, ''],
+                        }
+                      : current,
+                  );
+                }}
+              >
+                Add Step
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDraftPlanModal(false);
                 }}
               >
                 Save
