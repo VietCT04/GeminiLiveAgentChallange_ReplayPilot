@@ -98,19 +98,6 @@ const buildHighLevelPlanPrompt = (
   ].join('\n');
 };
 
-const resolveWorkflowInputPlaceholders = (
-  steps: string[],
-  workflowInputs: Record<string, string>,
-): string[] => {
-  return steps.map((step) =>
-    step.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (token, rawKey: string) => {
-      const key = rawKey.trim();
-      const value = workflowInputs[key];
-      return typeof value === 'string' && value.length > 0 ? value : token;
-    }),
-  );
-};
-
 export const generateHighLevelPlan = async (
   goal: string,
   workflowInputs: Record<string, string> = {},
@@ -143,11 +130,7 @@ export const generateHighLevelPlan = async (
   }
 
   try {
-    const parsed = HighLevelPlanSchema.parse(parsedJson);
-    return {
-      ...parsed,
-      steps: resolveWorkflowInputPlaceholders(parsed.steps, workflowInputs),
-    };
+    return HighLevelPlanSchema.parse(parsedJson);
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'unknown schema error';
     throw new Error(`Gemini high-level plan returned invalid JSON: ${reason}`);

@@ -6,6 +6,7 @@ import {
   StartRunRequestSchema,
   StartRunResponseSchema,
   type RunState,
+  type WorkflowInput,
 } from '@replaypilot/shared';
 import { useEffect, useRef, useState } from 'react';
 import { API_BASE_URL, USE_ORCHESTRATOR_START } from './config';
@@ -72,8 +73,13 @@ function App() {
   const [isPolling, setIsPolling] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [isPreparingInputs, setIsPreparingInputs] = useState(false);
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [draftPlan, setDraftPlan] = useState<DraftPlan | null>(null);
+  const [workflowInputs, setWorkflowInputs] = useState<Record<string, string>>({});
+  const [workflowInputDefs, setWorkflowInputDefs] = useState<WorkflowInput[]>([]);
+  const [showInputsPanel, setShowInputsPanel] = useState(false);
+  const [pendingPlanGenerationGoal, setPendingPlanGenerationGoal] = useState<string | null>(null);
   const [pendingProposal, setPendingProposal] = useState<{
     goal: string;
     summary?: string;
@@ -111,6 +117,53 @@ function App() {
 
   const normalizeDraftPlanSteps = (steps: string[]): string[] => {
     return steps.map((step) => step.trim()).filter((step) => step.length > 0);
+  };
+
+  const resolvePlanStepsWithInputs = (
+    steps: string[],
+    inputMap: Record<string, string>,
+  ): string[] => {
+    return steps.map((step) =>
+      step.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_token, rawKey: string) => {
+        const key = rawKey.trim();
+        return inputMap[key] ?? `{{${key}}}`;
+      }),
+    );
+  };
+
+  const collectMissingPlaceholderKeys = (
+    steps: string[],
+    inputMap: Record<string, string>,
+  ): string[] => {
+    const keys = new Set<string>();
+
+    for (const step of steps) {
+      const matches = step.matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g);
+
+      for (const match of matches) {
+        const key = (match[1] ?? '').trim();
+
+        if (!key || inputMap[key]) {
+          continue;
+        }
+
+        keys.add(key);
+      }
+    }
+
+    return Array.from(keys);
+  };
+
+  const collectMissingRequiredWorkflowInputs = (): string[] => {
+    const requiredKeys =
+      workflowInputDefs.length > 0
+        ? workflowInputDefs.filter((inputDef) => inputDef.required).map((inputDef) => inputDef.key)
+        : [];
+
+    return requiredKeys.filter((key) => {
+      const value = workflowInputs[key];
+      return typeof value !== 'string' || value.trim().length === 0;
+    });
   };
 
   const stopPolling = (): void => {
@@ -233,9 +286,31 @@ function App() {
 
     try {
       const approvedPlanSteps = normalizeDraftPlanSteps(draftPlan.steps);
+      const missingInputKeys = collectMissingPlaceholderKeys(
+        approvedPlanSteps,
+        workflowInputs,
+      );
+
+      if (missingInputKeys.length > 0) {
+        const missingList = missingInputKeys.join(', ');
+        window.alert(
+          `Missing required workflow inputs for placeholders: ${missingList}`,
+        );
+        appendMessage(
+          'system',
+          `Missing workflow inputs for placeholders: ${missingList}. Please fill them from + Inputs before confirming.`,
+        );
+        setIsStartingRun(false);
+        return;
+      }
+
+      const resolvedPlanSteps = resolvePlanStepsWithInputs(
+        approvedPlanSteps,
+        workflowInputs,
+      );
       const requestBody = StartRunRequestSchema.parse({
         goal: planGoal,
-        planSteps: approvedPlanSteps,
+        planSteps: resolvedPlanSteps,
       });
       const endpointPath =
         USE_ORCHESTRATOR_START
@@ -338,6 +413,7 @@ function App() {
   const prepareWorkflowInputsForPlan = async (
     goalInput: string,
   ): Promise<{
+    inputs: WorkflowInput[];
     inputMap: Record<string, string>;
     missingRequiredKeys: string[];
   }> => {
@@ -364,9 +440,37 @@ function App() {
     );
 
     return {
+      inputs: payload.inputs,
       inputMap: payload.inputMap,
       missingRequiredKeys: payload.missingRequiredKeys,
     };
+  };
+
+  const handleGeneratePlanFromInputsModal = async (): Promise<void> => {
+    if (!pendingPlanGenerationGoal) {
+      setShowInputsPanel(false);
+      return;
+    }
+
+    const missingRequiredKeys = collectMissingRequiredWorkflowInputs();
+
+    if (missingRequiredKeys.length > 0) {
+      const missingList = missingRequiredKeys.join(', ');
+      window.alert(`Missing required workflow inputs: ${missingList}`);
+      appendMessage(
+        'system',
+        `Missing required workflow inputs: ${missingList}. Please fill them before generating the plan.`,
+      );
+      return;
+    }
+
+    await generatePlan({
+      goalInput: pendingPlanGenerationGoal,
+      workflowInputs,
+      failureMessage: 'Failed to generate workflow plan',
+    });
+    setPendingPlanGenerationGoal(null);
+    setShowInputsPanel(false);
   };
 
   const handleStopClick = async (): Promise<void> => {
@@ -729,26 +833,17 @@ function App() {
                       .join('\n\n');
 
                     try {
+                      setIsPreparingInputs(true);
                       const preparedInputs =
                         await prepareWorkflowInputsForPlan(planGoalText);
-
-                      if (preparedInputs.missingRequiredKeys.length > 0) {
-                        const missingList = preparedInputs.missingRequiredKeys.join(', ');
-                        const popupMessage =
-                          `Missing required workflow inputs: ${missingList}\n\nPlease provide these values in chat, then click Generate Workflow Plan again.`;
-                        window.alert(popupMessage);
-                        appendMessage(
-                          'system',
-                          `Missing required workflow inputs: ${missingList}. Please provide them in chat before generating the plan.`,
-                        );
-                        return;
-                      }
-
-                      await generatePlan({
-                        goalInput: planGoalText,
-                        workflowInputs: preparedInputs.inputMap,
-                        failureMessage: 'Failed to generate workflow plan',
-                      });
+                      setWorkflowInputDefs(preparedInputs.inputs);
+                      setWorkflowInputs(preparedInputs.inputMap);
+                      setShowInputsPanel(true);
+                      setPendingPlanGenerationGoal(planGoalText);
+                      appendMessage(
+                        'system',
+                        'Workflow inputs are ready. Review/edit them in the popup, then click Generate Workflow Plan there.',
+                      );
                     } catch (error) {
                       const message =
                         error instanceof Error
@@ -756,12 +851,28 @@ function App() {
                           : 'Failed to generate workflow plan';
                       setRequestError(message);
                       appendMessage('system', message);
+                    } finally {
+                      setIsPreparingInputs(false);
                     }
                   })();
                 }}
-                disabled={!pendingProposal || isGeneratingPlan || isSendingMessage}
+                disabled={
+                  !pendingProposal || isGeneratingPlan || isSendingMessage || isPreparingInputs
+                }
               >
                 Generate Workflow Plan
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInputsPanel(true);
+                  setPendingPlanGenerationGoal(null);
+                }}
+                disabled={
+                  isGeneratingPlan || isSendingMessage || isStartingRun || isPreparingInputs
+                }
+              >
+                + Inputs
               </button>
               <button
                 type="button"
@@ -896,6 +1007,93 @@ function App() {
           </section>
         </aside>
       </section>
+      {showInputsPanel ? (
+        <div
+          className="inputs-modal-overlay"
+          onClick={() => {
+            setShowInputsPanel(false);
+          }}
+        >
+          <section
+            className="inputs-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Workflow inputs"
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <header className="inputs-modal-header">
+              <h2>Workflow Inputs</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInputsPanel(false);
+                  setPendingPlanGenerationGoal(null);
+                }}
+              >
+                Close
+              </button>
+            </header>
+            <p className="inputs-modal-subtitle">
+              Edit key values here. These values are injected into placeholders before run start.
+            </p>
+            <div className="inputs-modal-list">
+              {(workflowInputDefs.length > 0
+                ? workflowInputDefs
+                : Object.keys(workflowInputs).map((key) => ({
+                    key,
+                    label: key,
+                    required: false,
+                    value: workflowInputs[key],
+                  } as WorkflowInput))
+              ).map((inputDef) => (
+                <label className="inputs-row" key={inputDef.key}>
+                  <span className="inputs-key">
+                    {inputDef.key}
+                    {inputDef.required ? ' *' : ''}
+                  </span>
+                  <input
+                    className="inputs-value"
+                    type="text"
+                    value={workflowInputs[inputDef.key] ?? inputDef.value ?? ''}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setWorkflowInputs((current) => ({
+                        ...current,
+                        [inputDef.key]: nextValue,
+                      }));
+                    }}
+                    placeholder={inputDef.label}
+                  />
+                </label>
+              ))}
+            </div>
+            <footer className="inputs-modal-footer">
+              {pendingPlanGenerationGoal ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleGeneratePlanFromInputsModal();
+                  }}
+                  disabled={isGeneratingPlan || isPreparingInputs}
+                >
+                  Generate Workflow Plan
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInputsPanel(false);
+                  setPendingPlanGenerationGoal(null);
+                }}
+              >
+                Save
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

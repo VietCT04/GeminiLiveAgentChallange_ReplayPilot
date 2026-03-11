@@ -527,6 +527,88 @@ dd {
   border-top-color: #fff;
 }
 
+.inputs-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(22, 30, 40, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 2000;
+  padding: 16px;
+}
+
+.inputs-modal {
+  width: min(720px, 100%);
+  max-height: min(80vh, 720px);
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid #c9d1db;
+  background: #f7f9fc;
+  box-shadow: 0 16px 40px rgba(18, 24, 33, 0.28);
+  display: flex;
+  flex-direction: column;
+}
+
+.inputs-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #d7dde6;
+  background: #eef2f8;
+}
+
+.inputs-modal-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.inputs-modal-subtitle {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: #4a5565;
+  border-bottom: 1px solid #dfe5ed;
+}
+
+.inputs-modal-list {
+  padding: 12px 14px;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+}
+
+.inputs-row {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.inputs-key {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1f2b38;
+}
+
+.inputs-value {
+  width: 100%;
+  border: 1px solid #c5ced8;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+}
+
+.inputs-modal-footer {
+  padding: 10px 14px;
+  border-top: 1px solid #d7dde6;
+  display: flex;
+  justify-content: flex-end;
+}
+
 @keyframes spin {
   from {
     transform: rotate(0deg);
@@ -559,5 +641,11 @@ dd {
 
   .status-panel {
     order: 3;
+  }
+}
+
+@media (max-width: 760px) {
+  .inputs-row {
+    grid-template-columns: 1fr;
   }
 }
