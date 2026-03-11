@@ -161,6 +161,11 @@ const normalizeToolCallName = (
           deltaY: -600,
         },
       };
+    case 'scroll_document':
+    case 'scroll_at':
+      return {
+        normalizedName: 'scroll',
+      };
     default:
       return { normalizedName: lowerName };
   }
@@ -312,6 +317,30 @@ const readNumber = (...values: unknown[]): number | null => {
     if (typeof value === 'number' && Number.isFinite(value)) {
       return value;
     }
+  }
+
+  return null;
+};
+
+const readScrollDeltaY = (args: Record<string, unknown>): number | null => {
+  const directDelta = readNumber(args.deltaY, args.delta_y, args.y, args.amount);
+
+  if (directDelta !== null) {
+    return directDelta;
+  }
+
+  const direction = readString(args.direction)?.toLowerCase();
+
+  if (direction === 'down') {
+    return 600;
+  }
+
+  if (direction === 'up') {
+    return -600;
+  }
+
+  if (direction === 'left' || direction === 'right') {
+    return 0;
   }
 
   return null;
@@ -548,7 +577,7 @@ const mapFunctionCallToPlannerOutput = (
   }
 
   if (lowerName === 'scroll_by' || lowerName === 'scroll') {
-    const deltaY = readNumber(args.deltaY, args.delta_y, args.y, args.amount);
+    const deltaY = readScrollDeltaY(args);
 
     if (deltaY === null) {
       throw new Error(`Computer Use tool call ${name} did not include a scroll delta`);

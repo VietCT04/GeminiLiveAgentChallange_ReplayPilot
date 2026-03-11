@@ -175,6 +175,9 @@ const normalizeToolName = (name: string): string => {
       return 'scroll';
     case 'scroll_up':
       return 'scroll';
+    case 'scroll_document':
+    case 'scroll_at':
+      return 'scroll';
     default:
       return lowerName;
   }
@@ -274,6 +277,19 @@ const executeToolCall = async (
     }
     case 'scroll_by':
     case 'scroll': {
+      const direction = typeof args.direction === 'string' ? args.direction.toLowerCase() : null;
+      const deltaX =
+        typeof args.deltaX === 'number'
+          ? args.deltaX
+          : typeof args.delta_x === 'number'
+            ? args.delta_x
+            : typeof args.x === 'number'
+              ? args.x
+              : direction === 'right'
+                ? 400
+                : direction === 'left'
+                  ? -400
+                  : 0;
       const deltaY =
         typeof args.deltaY === 'number'
           ? args.deltaY
@@ -283,13 +299,17 @@ const executeToolCall = async (
               ? args.amount
               : typeof args.y === 'number'
                 ? args.y
+                : direction === 'down'
+                  ? 600
+                  : direction === 'up'
+                    ? -600
                 : name === 'scroll'
                   ? 600
                   : null;
-      if (deltaY === null) {
+      if (deltaY === null && deltaX === 0) {
         throw new Error(`Tool call ${toolCall.name ?? 'unknown'} missing scroll delta`);
       }
-      await page.mouse.wheel(0, deltaY);
+      await page.mouse.wheel(deltaX, deltaY ?? 0);
       return;
     }
     case 'wait': {
