@@ -134,6 +134,7 @@ export type StartRunRequest = z.infer<typeof StartRunRequestSchema>;
 
 export const GeneratePlanRequestSchema = z.object({
   goal: z.string().trim().min(1),
+  workflowInputs: z.record(z.string(), z.string()).optional(),
 });
 
 export type GeneratePlanRequest = z.infer<typeof GeneratePlanRequestSchema>;
@@ -142,9 +143,46 @@ export const GeneratePlanResponseSchema = z.object({
   goal: z.string(),
   summary: z.string().trim().min(1),
   steps: z.array(z.string().trim().min(1).max(200)).min(1),
+  workflowInputsUsed: z.record(z.string(), z.string()).optional(),
 });
 
 export type GeneratePlanResponse = z.infer<typeof GeneratePlanResponseSchema>;
+
+export const WorkflowInputSchema = z.object({
+  key: z.string().trim().min(1),
+  label: z.string().trim().min(1),
+  required: z.boolean(),
+  value: z.string().trim().min(1).optional(),
+  reason: z.string().trim().min(1).optional(),
+});
+
+export type WorkflowInput = z.infer<typeof WorkflowInputSchema>;
+
+export const PrepareWorkflowInputsRequestSchema = z.object({
+  goal: z.string().trim().min(1),
+  history: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant', 'system']),
+        text: z.string().trim().min(1).max(4000),
+      }),
+    )
+    .default([]),
+});
+
+export type PrepareWorkflowInputsRequest = z.infer<
+  typeof PrepareWorkflowInputsRequestSchema
+>;
+
+export const PrepareWorkflowInputsResponseSchema = z.object({
+  inputs: z.array(WorkflowInputSchema),
+  inputMap: z.record(z.string(), z.string()),
+  missingRequiredKeys: z.array(z.string().trim().min(1)),
+});
+
+export type PrepareWorkflowInputsResponse = z.infer<
+  typeof PrepareWorkflowInputsResponseSchema
+>;
 
 export const StartRunResponseSchema = z.object({
   runId: z.string(),

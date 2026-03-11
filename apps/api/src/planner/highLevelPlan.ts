@@ -38,7 +38,18 @@ const getClient = (): GoogleGenAI => {
   return new GoogleGenAI({ apiKey });
 };
 
-const buildHighLevelPlanPrompt = (goal: string): string => {
+const buildHighLevelPlanPrompt = (
+  goal: string,
+  workflowInputs: Record<string, string>,
+): string => {
+  const workflowInputEntries = Object.entries(workflowInputs);
+  const workflowInputText =
+    workflowInputEntries.length > 0
+      ? workflowInputEntries
+          .map(([key, value]) => `- ${key}: ${value}`)
+          .join('\n')
+      : '- none';
+
   return [
     'You are ReplayPilot workflow planner.',
     'Your job is to convert a confirmed workflow goal into an explicit browser execution plan for a computer-use agent.',
@@ -70,8 +81,9 @@ const buildHighLevelPlanPrompt = (goal: string): string => {
     'Planning rules:',
     '- Prefer one clear user-visible action per step.',
     '- Mention the target page, button, field label, or visible text whenever possible.',
-    '- If a value is known from the user goal, include it explicitly.',
-    '- If a value is unknown, use a placeholder and mention it clearly.',
+    '- For known workflow inputs, use placeholder format {{input_key}} in template steps instead of literal value.',
+    '- Never emit unresolved bracket placeholders like [YOUR_USERNAME] or [PASSWORD].',
+    '- If a required value is unknown, refer to input key name (for example: username) and do not invent literal data.',
     '- If login is required but credentials are not provided, include a login step and mark it as requiring user action or confirmation.',
     '- The final submit/approve/send action should usually be its own sensitive step.',
     '- Keep each step short but specific.',
@@ -79,19 +91,36 @@ const buildHighLevelPlanPrompt = (goal: string): string => {
     'Output JSON only:',
     '{ "summary": string, "steps": string[] }',
     '',
+    'Available workflow inputs:',
+    workflowInputText,
+    '',
     `Confirmed workflow goal: ${goal}`,
   ].join('\n');
 };
 
+const resolveWorkflowInputPlaceholders = (
+  steps: string[],
+  workflowInputs: Record<string, string>,
+): string[] => {
+  return steps.map((step) =>
+    step.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (token, rawKey: string) => {
+      const key = rawKey.trim();
+      const value = workflowInputs[key];
+      return typeof value === 'string' && value.length > 0 ? value : token;
+    }),
+  );
+};
+
 export const generateHighLevelPlan = async (
   goal: string,
+  workflowInputs: Record<string, string> = {},
 ): Promise<HighLevelPlan> => {
   const ai = getClient();
   const response = await withGeminiRetry(
     async () =>
       ai.models.generateContent({
         model: HIGH_LEVEL_PLAN_MODEL_NAME,
-        contents: [{ text: buildHighLevelPlanPrompt(goal) }],
+        contents: [{ text: buildHighLevelPlanPrompt(goal, workflowInputs) }],
         config: {
           responseMimeType: 'application/json',
           responseSchema: HighLevelPlanResponseSchema,
@@ -114,7 +143,11 @@ export const generateHighLevelPlan = async (
   }
 
   try {
-    return HighLevelPlanSchema.parse(parsedJson);
+    const parsed = HighLevelPlanSchema.parse(parsedJson);
+    return {
+      ...parsed,
+      steps: resolveWorkflowInputPlaceholders(parsed.steps, workflowInputs),
+    };
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'unknown schema error';
     throw new Error(`Gemini high-level plan returned invalid JSON: ${reason}`);

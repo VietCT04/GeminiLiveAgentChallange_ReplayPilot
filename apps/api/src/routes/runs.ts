@@ -2,6 +2,8 @@ import {
   ActionSchema,
   GeneratePlanRequestSchema,
   GeneratePlanResponseSchema,
+  PrepareWorkflowInputsRequestSchema,
+  PrepareWorkflowInputsResponseSchema,
   StartRunRequestSchema,
   type StartRunRequest,
   StartRunResponseSchema,
@@ -28,6 +30,7 @@ import {
 } from '../planner/geminiPlanner';
 import { generateHighLevelPlan } from '../planner/highLevelPlan';
 import { generateChatReply } from '../planner/chatAssistant';
+import { prepareWorkflowInputs } from '../planner/prepareWorkflowInputs';
 
 const allowedArtifactExtensions = new Set(['.png', '.jpg', '.jpeg', '.json']);
 const defaultViewport = {
@@ -201,6 +204,30 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
     return reply.send(response);
   });
 
+  app.post('/prepare-workflow-inputs', async (request, reply) => {
+    const parsedBody = PrepareWorkflowInputsRequestSchema.safeParse(request.body);
+
+    if (!parsedBody.success) {
+      return reply.code(400).send({
+        message: 'Invalid workflow input preparation request',
+        issues: parsedBody.error.issues,
+      });
+    }
+
+    const prepared = await prepareWorkflowInputs(
+      parsedBody.data.goal,
+      parsedBody.data.history,
+    );
+
+    return reply.send(
+      PrepareWorkflowInputsResponseSchema.parse({
+        inputs: prepared.inputs,
+        inputMap: prepared.inputMap,
+        missingRequiredKeys: prepared.missingRequiredKeys,
+      }),
+    );
+  });
+
   app.post('/plan', async (request, reply) => {
     const parsedBody = GeneratePlanRequestSchema.safeParse(request.body);
 
@@ -211,11 +238,16 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const generatedPlan = await generateHighLevelPlan(parsedBody.data.goal);
+    const workflowInputs = parsedBody.data.workflowInputs ?? {};
+    const generatedPlan = await generateHighLevelPlan(
+      parsedBody.data.goal,
+      workflowInputs,
+    );
     const response = GeneratePlanResponseSchema.parse({
       goal: parsedBody.data.goal,
       summary: generatedPlan.summary,
       steps: generatedPlan.steps,
+      workflowInputsUsed: workflowInputs,
     });
 
     return reply.send(response);

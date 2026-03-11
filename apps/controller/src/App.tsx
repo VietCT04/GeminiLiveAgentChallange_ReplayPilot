@@ -1,6 +1,7 @@
 import {
   GeneratePlanRequestSchema,
   GeneratePlanResponseSchema,
+  PrepareWorkflowInputsResponseSchema,
   RunStateSchema,
   StartRunRequestSchema,
   StartRunResponseSchema,
@@ -161,15 +162,20 @@ function App() {
   };
 
   const generatePlan = async (
-    goalInput: string,
-    failureMessage: string,
+    options: {
+      goalInput: string;
+      workflowInputs?: Record<string, string>;
+      failureMessage: string;
+    },
   ): Promise<void> => {
+    const { goalInput, workflowInputs, failureMessage } = options;
     setRequestError(null);
     setIsGeneratingPlan(true);
 
     try {
       const requestBody = GeneratePlanRequestSchema.parse({
         goal: goalInput,
+        ...(workflowInputs ? { workflowInputs } : {}),
       });
 
       const response = await fetch(`${API_BASE_URL}/runs/plan`, {
@@ -327,6 +333,40 @@ function App() {
     } finally {
       setIsSendingMessage(false);
     }
+  };
+
+  const prepareWorkflowInputsForPlan = async (
+    goalInput: string,
+  ): Promise<{
+    inputMap: Record<string, string>;
+    missingRequiredKeys: string[];
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/runs/prepare-workflow-inputs`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        goal: goalInput,
+        history: messages.slice(-20).map((entry) => ({
+          role: entry.role,
+          text: entry.text,
+        })),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to prepare workflow inputs');
+    }
+
+    const payload = PrepareWorkflowInputsResponseSchema.parse(
+      (await response.json()) as unknown,
+    );
+
+    return {
+      inputMap: payload.inputMap,
+      missingRequiredKeys: payload.missingRequiredKeys,
+    };
   };
 
   const handleStopClick = async (): Promise<void> => {
@@ -673,21 +713,52 @@ function App() {
               </button>
               <button
                 type="button"
-                onClick={() =>
-                  void generatePlan(
-                    pendingProposal
-                      ? [
-                          pendingProposal.goal,
-                          pendingProposal.summary
-                            ? `Context:\n${pendingProposal.summary}`
-                            : '',
-                        ]
-                          .filter((part) => part.length > 0)
-                          .join('\n\n')
-                      : '',
-                    'Failed to generate workflow plan',
-                  )
-                }
+                onClick={() => {
+                  void (async () => {
+                    if (!pendingProposal) {
+                      return;
+                    }
+
+                    const planGoalText = [
+                      pendingProposal.goal,
+                      pendingProposal.summary
+                        ? `Context:\n${pendingProposal.summary}`
+                        : '',
+                    ]
+                      .filter((part) => part.length > 0)
+                      .join('\n\n');
+
+                    try {
+                      const preparedInputs =
+                        await prepareWorkflowInputsForPlan(planGoalText);
+
+                      if (preparedInputs.missingRequiredKeys.length > 0) {
+                        const missingList = preparedInputs.missingRequiredKeys.join(', ');
+                        const popupMessage =
+                          `Missing required workflow inputs: ${missingList}\n\nPlease provide these values in chat, then click Generate Workflow Plan again.`;
+                        window.alert(popupMessage);
+                        appendMessage(
+                          'system',
+                          `Missing required workflow inputs: ${missingList}. Please provide them in chat before generating the plan.`,
+                        );
+                        return;
+                      }
+
+                      await generatePlan({
+                        goalInput: planGoalText,
+                        workflowInputs: preparedInputs.inputMap,
+                        failureMessage: 'Failed to generate workflow plan',
+                      });
+                    } catch (error) {
+                      const message =
+                        error instanceof Error
+                          ? error.message
+                          : 'Failed to generate workflow plan';
+                      setRequestError(message);
+                      appendMessage('system', message);
+                    }
+                  })();
+                }}
                 disabled={!pendingProposal || isGeneratingPlan || isSendingMessage}
               >
                 Generate Workflow Plan
