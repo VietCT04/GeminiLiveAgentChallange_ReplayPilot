@@ -30,4 +30,5 @@
 - 2026-03-12T08:43:02Z [CODE] Local executor now accepts wait_N_seconds tool aliases by normalizing to wait and parsing duration from tool name when args lack timing.
 - 2026-03-12T09:28:21Z [CODE] Local executor now logs each planner step with LLM tool call name and args before execution.
 - 2026-03-12T09:37:03Z [CODE] Judge prompt now instructs PASS for submit/create steps when post-submit success cues appear (including cleared/reset form) even if submit button remains visible.
+- 2026-03-12T09:56:43Z [CODE] Planner prompt now includes explicit segmented date-field instructions: click date input/day segment and type full digits DDMMYYYY without separators.
 
