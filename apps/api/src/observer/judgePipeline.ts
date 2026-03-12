@@ -128,16 +128,16 @@ export const requiresSafetyConfirmation = (stepCriteria: string): boolean => {
 const buildVisionJudgePrompt = (input: JudgeInput): string => {
   return [
     'You are a strict visual judge for a browser automation step.',
-    'Decide only from the screenshot and the provided step criteria.',
+    'Decide only from the screenshot, URL context, and the provided step criteria.',
     'Return whether the current screen satisfies the step.',
     `Goal: ${input.goal}`,
     `Step ${input.stepIndex + 1} criteria: ${input.stepCriteria}`,
     `Current URL: ${input.currentUrl}`,
-    'Return PASS if the step is visibly complete.',
-    'Return RETRY if the step is not complete but progress appears possible.',
-    'Return FAIL if the screen shows a dead end, error, or no realistic path.',
+    'Return PASS if the step is complete or if the expected post-action state is already reached (for example: already logged in, redirected to the target page, or target control is gone because the action succeeded).',
+    'Return RETRY if the step is not complete but progress appears possible, including when the UI changed after interaction and the next action is still feasible.',
+    'Return FAIL only for clear dead ends: explicit error state, blocked access, irreversible wrong page, or no realistic path forward.',
     'Return WAITING_FOR_HUMAN if the screenshot shows CAPTCHA, explicit human verification, or a sensitive confirmation gate.',
-    'Include short reasons and cite visible text or UI cues as evidence.',
+    'Do not return FAIL only because a previously clicked button is no longer visible. Include short reasons and cite visible text or UI cues as evidence.',
   ].join('\n');
 };
 
@@ -228,7 +228,6 @@ export const evaluateStep = async (
       stateDetection,
     };
   }
-
   if (visionJudge.verdict === 'FAIL') {
     return {
       verdict: 'FAIL',
@@ -269,3 +268,6 @@ export const evaluateStep = async (
     stateDetection,
   };
 };
+
+
+
