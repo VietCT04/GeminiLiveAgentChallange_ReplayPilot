@@ -398,6 +398,25 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
             updatedAt: Date.now(),
             error: `Judge failed step: ${evaluation.reasonsUi.join('; ')}`,
           });
+        } else if (evaluation.verdict === 'RETRY') {
+          const lastHistoryIndex = nextRunState.history.length - 1;
+          if (lastHistoryIndex >= 0) {
+            const lastEntry = nextRunState.history[lastHistoryIndex];
+            if (lastEntry) {
+              const retryReasonNote = `Judge RETRY: ${evaluation.reasonsFull.join(' | ')}`;
+              const updatedHistory = [...nextRunState.history];
+              updatedHistory[lastHistoryIndex] = {
+                ...lastEntry,
+                note: lastEntry.note
+                  ? `${lastEntry.note} | ${retryReasonNote}`
+                  : retryReasonNote,
+              };
+              nextRunState = await updateRun(runState.runId, {
+                history: updatedHistory,
+                updatedAt: Date.now(),
+              });
+            }
+          }
         } else if (
           evaluation.verdict === 'PASS' &&
           runState.planSteps.length > 0 &&
@@ -555,3 +574,4 @@ export const runsRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 };
+

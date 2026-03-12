@@ -653,7 +653,7 @@ const buildPrompt = (
     'Do not call open_web_browser again if the browser is already open on the target site.',
     'After opening the site, prefer click_at, type_text, press_key, scroll_by, or wait.',
     'For click_at and type_text_at, use normalized coordinates from 0 to 1000 on both axes.',
-    'For date fields (for example placeholder DD/MM/YYYY): click the leftmost day segment (DD), then type the full date digits without separators (example 02032006 for 02/03/2006).',
+    'For date fields (for example placeholder DD/MM/YYYY): click the leftmost segment (DD) or (for example placeholder MM/DD/YYYY) click the leftmost segment (MM), then type the full date digits without separators (example 02032006 for 02/03/2006).',
     'Do not use raw pixel coordinates.',
     `The screenshot viewport image is ${viewport.width}px wide and ${viewport.height}px high, but tool-call coordinates must stay normalized.`,
     'Only return JSON when the task is complete and the correct action is to stop.',
