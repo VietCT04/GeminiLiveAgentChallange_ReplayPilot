@@ -12,7 +12,6 @@ import {
 } from '../observer/judgePipeline';
 import {
   planComputerUseStepDetailed,
-  planNextActionDetailed,
   type ComputerUseToolCall,
 } from '../planner/geminiPlanner';
 import {
@@ -284,62 +283,12 @@ const shouldStop = async (runId: string): Promise<boolean> => {
 };
 
 const ensureAllowedNavigateUrl = (urlValue: string): void => {
-  let url: URL;
-
   try {
-    url = new URL(urlValue);
+    new URL(urlValue);
   } catch {
     throw new Error(`Planner returned invalid navigation URL: ${urlValue}`);
   }
 
-};
-
-const ensureAllowedNavigate = (action: Action): void => {
-  if (action.type !== 'navigate') {
-    return;
-  }
-
-  ensureAllowedNavigateUrl(action.url);
-};
-
-const ensureCoordinatesInViewport = (action: Action): void => {
-  if (action.type === 'click') {
-    const { x, y } = action;
-
-    if (
-      !Number.isInteger(x) ||
-      !Number.isInteger(y) ||
-      x < 0 ||
-      y < 0 ||
-      x >= VIEWPORT.width ||
-      y >= VIEWPORT.height
-    ) {
-      throw new Error(
-        `Planner returned off-screen click coordinates: (${x}, ${y}) for viewport ${VIEWPORT.width}x${VIEWPORT.height}`,
-      );
-    }
-  }
-
-  if (
-    action.type === 'type' &&
-    typeof action.x === 'number' &&
-    typeof action.y === 'number'
-  ) {
-    const { x, y } = action;
-
-    if (
-      !Number.isInteger(x) ||
-      !Number.isInteger(y) ||
-      x < 0 ||
-      y < 0 ||
-      x >= VIEWPORT.width ||
-      y >= VIEWPORT.height
-    ) {
-      throw new Error(
-        `Planner returned off-screen type coordinates: (${x}, ${y}) for viewport ${VIEWPORT.width}x${VIEWPORT.height}`,
-      );
-    }
-  }
 };
 
 const ensureNoLoop = (history: StepRecord[], action: Action): void => {
@@ -352,45 +301,6 @@ const ensureNoLoop = (history: StepRecord[], action: Action): void => {
 
   if (lastTwo.every((entry) => entry === actionKey)) {
     throw new Error(`Planner repeated the same action 3 times: ${actionKey}`);
-  }
-};
-
-export const executeAction = async (page: Page, action: Action): Promise<void> => {
-  switch (action.type) {
-    case 'navigate':
-      await page.goto(action.url, {
-        waitUntil: 'domcontentloaded',
-        timeout: NAVIGATION_TIMEOUT_MS,
-      });
-      break;
-    case 'click':
-      await page.mouse.click(action.x, action.y, {
-        button: action.button ?? 'left',
-        clickCount: action.clicks ?? 1,
-      });
-      break;
-    case 'type':
-      if (typeof action.x === 'number' && typeof action.y === 'number') {
-        await page.mouse.click(action.x, action.y);
-      }
-      await clearFocusedField(page);
-      await page.keyboard.type(action.text, { delay: 40 });
-      if (action.submit) {
-        await page.keyboard.press('Enter');
-      }
-      break;
-    case 'scroll':
-      await page.mouse.wheel(0, action.deltaY);
-      break;
-    case 'wait':
-      await wait(page, action.ms);
-      break;
-    case 'done':
-      break;
-    default: {
-      const exhaustiveCheck: never = action;
-      throw new Error(`Unsupported action: ${JSON.stringify(exhaustiveCheck)}`);
-    }
   }
 };
 
@@ -970,121 +880,6 @@ const pauseForSafetyConfirmationIfNeeded = async (
   );
 };
 
-export const runSequence = async (
-  runId: string,
-  log: { info: (context: object, message: string) => void },
-): Promise<void> => {
-  let browser: Browser | null = null;
-
-  try {
-    browser = await chromium.launch({ headless: false });
-    const context = await browser.newContext({
-      viewport: VIEWPORT,
-    });
-    const page = await context.newPage();
-    const startIndex = await initializeDefaultStartPage(runId, page);
-    let previousUrl: string | null = page.url();
-    let previousScreenshotHash: string | null = null;
-
-    for (let index = startIndex; index < MAX_STEPS; index += 1) {
-      if (await shouldStop(runId)) {
-        log.info({ runId }, 'Run stopped before planning next action');
-        break;
-      }
-
-      if (await pauseForCaptchaIfDetected(runId, page, log)) {
-        break;
-      }
-
-      const currentRun = await getRun(runId);
-
-      if (await pauseForSafetyConfirmationIfNeeded(runId, page, currentRun, log)) {
-        break;
-      }
-
-      const plannerScreenshot = await page.screenshot({
-        fullPage: false,
-      });
-
-      const { action, summary, debug } = await planNextActionDetailed(
-        currentRun.goal,
-        plannerScreenshot,
-        currentRun.history,
-        VIEWPORT,
-        {
-          verifierLowConfidenceStreak: 0,
-          planSteps: currentRun.planSteps,
-          completedPlanSteps: currentRun.completedPlanSteps,
-        },
-      );
-
-      await writePlannerDebugFiles(runId, index, debug);
-      ensureAllowedNavigate(action);
-      ensureCoordinatesInViewport(action);
-      ensureNoLoop(currentRun.history, action);
-
-      if (action.type === 'done') {
-        await appendHistory(runId, {
-          index,
-          ts: Date.now(),
-          action,
-          note: summary,
-        });
-        await updateRun(runId, {
-          status: 'success',
-          step: index + 1,
-          lastAction: action,
-          updatedAt: Date.now(),
-        });
-        log.info({ runId, step: index, reason: action.reason }, 'Run done');
-        break;
-      }
-
-      await executeAction(page, action);
-      await wait(page, STEP_SETTLE_MS);
-
-      if (await shouldStop(runId)) {
-        log.info({ runId }, 'Run stopped after action execution');
-        break;
-      }
-
-      await captureActionStep(runId, page, index, action, summary);
-      const judgeResult = await evaluateAndApplyJudge(
-        runId,
-        page,
-        currentRun,
-        index,
-        log,
-        previousUrl,
-        previousScreenshotHash,
-      );
-      previousUrl = judgeResult.nextPreviousUrl;
-      previousScreenshotHash = judgeResult.nextPreviousScreenshotHash;
-
-      if (judgeResult.stopRun) {
-        break;
-      }
-
-      log.info(
-        { runId, step: index, actionType: action.type },
-        'Captured run step',
-      );
-    }
-
-    const latestRunState = await getRun(runId);
-
-    if (!isTerminalStatus(latestRunState.status)) {
-      throw new Error(`Planner reached max steps (${MAX_STEPS}) without finishing`);
-    }
-  } catch (error) {
-    await updateRun(runId, {
-      status: 'fail',
-      updatedAt: Date.now(),
-      error: error instanceof Error ? error.message : 'Run execution failed',
-    });
-    throw error;
-  }
-};
 
 export const runComputerUseSequence = async (
   runId: string,
@@ -1212,3 +1007,5 @@ export const runComputerUseSequence = async (
     await browser?.close();
   }
 };
+
+
