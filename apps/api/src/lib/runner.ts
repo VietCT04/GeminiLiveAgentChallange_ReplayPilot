@@ -549,7 +549,6 @@ const captureActionStep = async (
 
   await updateRun(runId, {
     status: 'running',
-    step: index + 1,
     lastAction: action,
     lastScreenshotUrl: `/runs/${runId}/artifacts/${screenshotName}`,
     updatedAt: Date.now(),
@@ -762,6 +761,7 @@ const evaluateAndApplyJudge = async (
   previousScreenshotHash: string | null,
 ): Promise<{
   stopRun: boolean;
+  verdict: JudgeEvaluation['verdict'];
   nextPreviousUrl: string;
   nextPreviousScreenshotHash: string;
 }> => {
@@ -792,6 +792,7 @@ const evaluateAndApplyJudge = async (
 
     return {
       stopRun: shouldStop,
+      verdict: evaluation.verdict,
       nextPreviousUrl: page.url(),
       nextPreviousScreenshotHash: evaluation.screenshotHash,
     };
@@ -810,6 +811,7 @@ const evaluateAndApplyJudge = async (
     const hasFinishedPlan = nextCompletedPlanSteps >= currentRun.planSteps.length;
 
     await updateRun(runId, {
+      step: currentRun.step + 1,
       completedPlanSteps: nextCompletedPlanSteps,
       approvedSafetyStep:
         currentRun.approvedSafetyStep === getCurrentPlanCriteria(currentRun)
@@ -831,6 +833,7 @@ const evaluateAndApplyJudge = async (
 
       return {
         stopRun: true,
+        verdict: evaluation.verdict,
         nextPreviousUrl: currentUrl,
         nextPreviousScreenshotHash: evaluation.screenshotHash,
       };
@@ -850,6 +853,7 @@ const evaluateAndApplyJudge = async (
 
   return {
     stopRun: false,
+    verdict: evaluation.verdict,
     nextPreviousUrl: currentUrl,
     nextPreviousScreenshotHash: evaluation.screenshotHash,
   };
@@ -939,29 +943,14 @@ export const runComputerUseSequence = async (
         : actionPreview;
       ensureNoLoop(currentRun.history, loggedAction);
 
-      if (loggedAction.type === 'done') {
-        await appendHistory(runId, {
-          index,
-          ts: Date.now(),
-          action: loggedAction,
-          note: summary,
-        });
-        await updateRun(runId, {
-          status: 'success',
-          step: index + 1,
-          lastAction: loggedAction,
-          updatedAt: Date.now(),
-        });
-        log.info({ runId, step: index, reason: loggedAction.reason }, 'Computer Use run done');
-        break;
-      }
-
-      if (!toolCall) {
+      if (!toolCall && loggedAction.type !== 'done') {
         throw new Error('Computer Use planner did not return a tool call');
       }
 
-      await executeComputerUseToolCall(page, currentRun.goal, toolCall, currentRun);
-      await wait(page, STEP_SETTLE_MS);
+      if (toolCall) {
+        await executeComputerUseToolCall(page, currentRun.goal, toolCall, currentRun);
+        await wait(page, STEP_SETTLE_MS);
+      }
 
       if (await shouldStop(runId)) {
         log.info({ runId }, 'Computer Use run stopped after tool execution');
@@ -985,8 +974,18 @@ export const runComputerUseSequence = async (
         break;
       }
 
+      if (loggedAction.type === 'done' && judgeResult.verdict === 'PASS') {
+        await updateRun(runId, {
+          status: 'success',
+          lastAction: loggedAction,
+          updatedAt: Date.now(),
+        });
+        log.info({ runId, step: index, reason: loggedAction.reason }, 'Computer Use run done');
+        break;
+      }
+
       log.info(
-        { runId, step: index, toolCall: toolCall.name ?? 'unknown' },
+        { runId, step: index, toolCall: toolCall?.name ?? loggedAction.type },
         'Captured computer use step',
       );
     }
@@ -1007,5 +1006,10 @@ export const runComputerUseSequence = async (
     await browser?.close();
   }
 };
+
+
+
+
+
 
 

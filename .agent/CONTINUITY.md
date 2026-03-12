@@ -23,4 +23,8 @@
 - 2026-03-12T08:01:08Z [TOOL] npm.cmd run lint -w apps/api passed.
 - 2026-03-12T08:01:08Z [TOOL] npm.cmd run typecheck -w apps/api passed.
 - 2026-03-12T08:03:15Z [USER] Removed guarded FAIL->RETRY downgrade logic from judge pipeline; kept change scope minimal per user instruction.
+- 2026-03-12T08:22:11Z [CODE] Runner step counter now updates only on judge PASS; removed step updates during capture and done-without-judge path in apps/api/src/lib/runner.ts.
+- 2026-03-12T08:25:49Z [CODE] Enforced done-after-judge-pass in local runner: done action now captures step, runs judge, and only marks success on PASS.
+- 2026-03-12T08:31:09Z [CODE] Removed done fast-path in runComputerUseSequence; done now goes through capture + judge path like other actions before completion.
+- 2026-03-12T08:32:48Z [CODE] Added explicit success path for done+judge PASS after shared judge flow to avoid unfinished runs when no plan steps exist.
 
