@@ -137,6 +137,7 @@ const buildVisionJudgePrompt = (input: JudgeInput): string => {
     'Return RETRY if the step is not complete but progress appears possible, including when the UI changed after interaction and the next action is still feasible.',
     'Return FAIL only for clear dead ends: explicit error state, blocked access, irreversible wrong page, or no realistic path forward.',
     'Return WAITING_FOR_HUMAN if the screenshot shows CAPTCHA, explicit human verification, or a sensitive confirmation gate.',
+    'For submit/create flows: if post-submit success cues are visible (toast, success message, new record in list, redirect, or form reset/cleared fields), return PASS even if the submit button is still present.',
     'Do not return FAIL only because a previously clicked button is no longer visible. Include short reasons and cite visible text or UI cues as evidence.',
   ].join('\n');
 };
@@ -268,6 +269,7 @@ export const evaluateStep = async (
     stateDetection,
   };
 };
+
 
 
 
