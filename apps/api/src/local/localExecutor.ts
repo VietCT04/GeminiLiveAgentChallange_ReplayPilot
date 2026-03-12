@@ -396,6 +396,15 @@ const executeRun = async (
 
       const actionToReport = ActionSchema.parse(planNextResponse.actionPreview);
       if (planNextResponse.toolCall) {
+        console.log(
+          `[Planner] step=${planNextResponse.runState.step} tool=${planNextResponse.toolCall.name ?? 'unknown'} args=${JSON.stringify(planNextResponse.toolCall.args ?? {})}`,
+        );
+      } else {
+        console.log(
+          `[Planner] step=${planNextResponse.runState.step} action=${actionToReport.type} (no tool call)`,
+        );
+      }
+      if (planNextResponse.toolCall) {
         await executeToolCall(page, goal, planNextResponse.toolCall);
       } else if (actionToReport.type !== 'done') {
         throw new Error('No tool call returned for non-done computer-use step');
@@ -523,5 +532,7 @@ void run().catch((error: unknown) => {
   console.error(message);
   process.exit(1);
 });
+
+
 
 
