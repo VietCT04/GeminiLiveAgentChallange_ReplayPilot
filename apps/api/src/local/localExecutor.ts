@@ -160,6 +160,9 @@ const clearFocusedField = async (page: Page): Promise<void> => {
 
 const normalizeToolName = (name: string): string => {
   const lowerName = name.toLowerCase();
+  if (/^wait_\d+_seconds?$/.test(lowerName)) {
+    return 'wait';
+  }
 
   switch (lowerName) {
     case 'open_browser':
@@ -322,6 +325,7 @@ const executeToolCall = async (
       return;
     }
     case 'wait': {
+      const waitFromNameMatch = (toolCall.name ?? '').toLowerCase().match(/^wait_(\d+)_seconds?$/);
       const ms =
         typeof args.ms === 'number'
           ? args.ms
@@ -329,7 +333,9 @@ const executeToolCall = async (
             ? args.milliseconds
             : typeof args.seconds === 'number'
               ? args.seconds * 1000
-              : 500;
+              : waitFromNameMatch?.[1]
+                ? Number(waitFromNameMatch[1]) * 1000
+                : 500;
       await page.waitForTimeout(Math.max(0, Math.round(ms)));
       return;
     }
@@ -517,3 +523,5 @@ void run().catch((error: unknown) => {
   console.error(message);
   process.exit(1);
 });
+
+

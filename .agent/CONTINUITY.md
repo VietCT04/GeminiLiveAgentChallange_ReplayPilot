@@ -27,4 +27,5 @@
 - 2026-03-12T08:25:49Z [CODE] Enforced done-after-judge-pass in local runner: done action now captures step, runs judge, and only marks success on PASS.
 - 2026-03-12T08:31:09Z [CODE] Removed done fast-path in runComputerUseSequence; done now goes through capture + judge path like other actions before completion.
 - 2026-03-12T08:32:48Z [CODE] Added explicit success path for done+judge PASS after shared judge flow to avoid unfinished runs when no plan steps exist.
+- 2026-03-12T08:43:02Z [CODE] Local executor now accepts wait_N_seconds tool aliases by normalizing to wait and parsing duration from tool name when args lack timing.
 
